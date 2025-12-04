@@ -1,0 +1,82 @@
+import torch
+from pathlib import Path
+from PIL import Image
+import torchvision.transforms.functional as F
+import numpy as np
+
+from .. import logger
+
+class ImageLoader(torch.utils.data.Dataset):
+    """
+    一个通用的图像加载器，可以从磁盘读取图像并进行预处理。
+    支持从文件路径列表或DataFrame中加载。
+    """
+    default_conf = {
+        'globs': ['*.jpg', '*.png', '*.jpeg', '*.JPG', '*.PNG'],
+        'grayscale': False,
+        'resize': None,
+        'resize_max': None,
+    }
+
+    def __init__(self, image_paths, conf=None):
+        """
+        初始化加载器。
+        :param image_paths: 一个包含图像绝对路径的列表。
+        :param conf: 配置字典，可以覆盖默认设置。
+        """
+        self.conf = conf = {**self.default_conf, **(conf or {})}
+        self.paths = image_paths
+
+        if len(self.paths) == 0:
+            raise ValueError('Could not find any image paths.')
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        path = self.paths[idx]
+        try:
+            image = Image.open(path)
+            if self.conf['grayscale']:
+                image = image.convert('L')
+            else:
+                image = image.convert('RGB')
+        except Exception as e:
+            logger.warning(f"Cannot load image {path}: {e}")
+            return None
+
+        original_size = image.size
+        if self.conf['resize']:
+            # --- 关键修改：处理整数类型的 resize 配置 ---
+            size_conf = self.conf['resize']
+            if isinstance(size_conf, int):
+                # 如果是整数，则创建一个正方形尺寸的元组
+                size = (size_conf, size_conf)
+            else:
+                # 否则，假定它已经是 (width, height) 格式
+                size = size_conf
+            # --- 修改结束 ---
+
+            if self.conf['resize_max'] and max(image.size) > self.conf['resize_max']:
+                scale = self.conf['resize_max'] / max(image.size)
+                size_new = tuple(int(round(x*scale)) for x in image.size)
+                image = image.resize(size_new, resample=Image.Resampling.LANCZOS)
+            else:
+                image = image.resize(size, resample=Image.Resampling.LANCZOS)
+        
+        image_tensor = F.to_tensor(image)
+        
+        return {
+            'image': image_tensor,
+            'path': str(path),
+            'original_size': np.array(original_size),
+        }
+
+def collate_fn(batch):
+    """
+    自定义的 collate_fn，用于从一个批次中安全地移除加载失败的图像（值为None）。
+    """
+    batch = list(filter(lambda x: x is not None, batch))
+    if not batch:
+        return {}
+    return torch.utils.data.dataloader.default_collate(batch)
