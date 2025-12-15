@@ -2,6 +2,7 @@ from PIL import Image
 from typing import List, Dict
 import argparse
 from transformers import CLIPProcessor, CLIPModel, CLIPConfig
+from transformers import CLIPModel as HfCLIPModel, CLIPProcessor, CLIPTokenizer
 from pathlib import Path
 import torch
 import torch.nn as nn  # <-- Add this line
@@ -15,6 +16,11 @@ import open_clip
 from . import logger
 from .utils.parsers import parse_image_lists
 from collections import defaultdict # <-- 1. 导入 defaultdict
+import re
+import spacy
+import csv
+from groundingdino.util.inference import predict as predict_grounding_dino, load_image # <-- 修改这一行
+
 
 try:
     from transformers import CLIPProcessor, CLIPModel, SiglipProcessor, SiglipModel
@@ -27,65 +33,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # MODEL_ID = "zer0int/LongCLIP-GmP-ViT-L-14" 
 # MODEL_ID = "google/siglip-base-patch16-224" 
 MODEL_ID = "laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K"
-
-# =======================================================================
-#  DINOv2 一致性评分函数 (核心精排逻辑)
-# =======================================================================
-@torch.no_grad()
-def dino_consistency_rerank(candidates: List[Dict[str, str]], image_dir: Path, dino_model, dino_processor, device) -> List[Dict[str, str]]:
-    """
-    使用 DINOv2 特征的一致性对候选列表进行评分和重排。
-
-    Args:
-        candidates: 候选列表，每个元素是 {'name': ..., 'clip_score': ...}
-        image_dir: 存放数据库图像的根目录。
-        dino_model: 预加载的 DINOv2 模型。
-        dino_processor: 预加载的 DINOv2 图像处理器。
-        device: 'cuda' 或 'cpu'。
-
-    Returns:
-        更新了 'dino_score' 的候选列表。
-    """
-    if len(candidates) < 2:
-        for c in candidates:
-            c['dino_score'] = 1.0  # 只有一个候选，一致性最高
-        return candidates
-
-    # --- a. 为所有候选图像提取 DINOv2 特征 ---
-    image_paths = [image_dir / c['name'] for c in candidates]
-    try:
-        images = [Image.open(p).convert("RGB") for p in image_paths]
-    except FileNotFoundError as e:
-        logger.error(f"DINO精排时无法找到图像: {e}")
-        # 如果有图像找不到，为所有候选设置一个默认的低分并返回
-        for c in candidates:
-            c['dino_score'] = 0.0
-        return candidates
-
-    inputs = dino_processor(images=images, return_tensors="pt").to(device)
-    outputs = dino_model(**inputs)
-    # 使用 [CLS] token 作为全局特征
-    dino_features = outputs.last_hidden_state[:, 0]
-    dino_features = torch.nn.functional.normalize(dino_features, p=2, dim=-1)
-
-    # --- b. 计算视觉一致性矩阵 ---
-    consistency_matrix = dino_features @ dino_features.T
-
-    # --- c. 计算每个候选的一致性分数 ---
-    consistency_matrix.fill_diagonal_(0)  # 忽略自相关
-    dino_scores = torch.sum(consistency_matrix, dim=1)
-
-    # 归一化分数到 [0, 1] 区间，以便与其他分数融合
-    if dino_scores.max() > dino_scores.min():
-        dino_scores = (dino_scores - dino_scores.min()) / (dino_scores.max() - dino_scores.min())
-    else:
-        dino_scores.fill_(1.0)
-
-    # --- d. 将分数添加回候选列表 ---
-    for i, c in enumerate(candidates):
-        c['dino_score'] = dino_scores[i].item()
-
-    return candidates
 
 # =======================================================================
 #  辅助函数 (用于加载特征和模型)
@@ -282,32 +229,35 @@ class ProbedCLIP(nn.Module):
 
 
 
+@torch.no_grad()
 def calculate_recall_at_k(query_names, db_names, top_k_indices, k_values, positive_map=None):
     """
-    计算给定 top-k 检索结果的召回率。
-    - query_names: 查询图像的文件名列表。
-    - db_names: 数据库图像的文件名列表。
-    - top_k_indices: 每个查询的前k个检索结果的索引。
-    - k_values: 一个列表，包含要计算召回率的k值 (例如 [1, 5, 10])。
-    - positive_map: 一个字典，将每个查询图像名映射到其正样本名称的集合。
+    计算给定查询的图像检索召回率。
     """
     if positive_map is None:
-        positive_map = defaultdict(set)
+        logger.error("未提供 positive_map，无法计算召回率。")
+        return {k: 0.0 for k in k_values}
 
     recalls = {k: 0 for k in k_values}
     total_queries_with_gt = 0
-
     db_names_set = set(db_names)
 
     for i, query_name in enumerate(tqdm(query_names, desc="Calculating recall")):
-        # --- 2. 扩展正确答案的定义 ---
-        # 正确答案集合 = {查询图像自身} U {在CSV中为其定义的所有正样本}
-        ground_truth_names = {query_name}.union(positive_map.get(query_name, set()))
+        # --- 核心修复：使用 basename 进行查找 ---
+        # 无论 query_name 是 'cam0/123.jpg' 还是 '123.jpg'，我们都只用 '123.jpg' 作为键
+        query_basename = Path(query_name).name
+        
+        # 在 positive_map 中查找时，也需要考虑 key 可能是 'cam0/123.jpg' 的情况
+        # 我们假设 positive_map 的键是相对路径
+        ground_truth_names = positive_map.get(query_basename)
+        if ground_truth_names is None:
+            # 如果用 basename 找不到，尝试用原始名再找一次，以增加兼容性
+            ground_truth_names = positive_map.get(query_name)
 
-        # 检查是否有任何一个正确答案存在于数据库中
-        if not any(gt_name in db_names_set for gt_name in ground_truth_names):
-            logger.warning(f"Query '{query_name}' and its positives not found in DB. Skipping for recall.")
+        if ground_truth_names is None or not ground_truth_names:
+            # 如果在真值文件中找不到这个查询，就跳过
             continue
+        # --- 修复结束 ---
         
         total_queries_with_gt += 1
         
@@ -521,6 +471,7 @@ def main(
     model_instance=None,
     processor_instance=None,
     query_list_path: Path = None,
+    positive_pairs_csv: Path = None,
 ):
     t_total_start = time.time()
     logger.info("开始 CLIP 检索流程...")
@@ -558,6 +509,7 @@ def main(
         text_features = model.get_text_features(**inputs)
 
     text_features = torch.nn.functional.normalize(text_features, p=2, dim=-1)
+    logger.info("文本查询编码完成。")
 
     # --- 4. 加载数据库图像特征 ---
     db_names, db_features = load_all_features(clip_features_path)
@@ -581,6 +533,54 @@ def main(
 
     logger.info(f"成功将 Top-{num_loc} 配对保存到 {loc_pairs}")
     logger.info(f"总耗时: {time.time() - t_total_start:.2f} 秒")
+
+    # --- 核心新增：直接在此处计算并打印召回率 ---
+    if positive_pairs_csv and positive_pairs_csv.exists():
+        logger.info(f"正在使用真值文件 {positive_pairs_csv} 计算召回率...")
+        
+        # 1. 定义一个简单的本地解析器来读取真值对
+        def parse_local_pairs(path: Path) -> List[tuple]:
+            pairs = []
+            with open(path, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            p1, p2 = line.strip().split(',')
+                            pairs.append((p1, p2))
+                        except ValueError:
+                            logger.warning(f"无法解析行: '{line.strip()}'，已跳过。")
+            return pairs
+
+        # 2. 加载真值对并构建 positive_map
+        try:
+            gt_pairs = parse_local_pairs(positive_pairs_csv)
+            positive_map = defaultdict(set)
+            for q, p in gt_pairs:
+                q_basename = Path(q).name
+                if 'allcams/' in p:
+                    p_cleaned = p.split('allcams/')[1]
+                else:
+                    p_cleaned = p
+                positive_map[q_basename].add(p_cleaned)
+        except Exception as e:
+            logger.error(f"解析真值对文件 {positive_pairs_csv} 失败: {e}。跳过召回率计算。")
+            return
+
+        # 3. 调用 calculate_recall_at_k 函数
+        recall_results = calculate_recall_at_k(
+            query_names=query_names,
+            db_names=db_names,
+            top_k_indices=top_k_db_indices.T.cpu().numpy(),
+            k_values=[1, 5, 10, 20],
+            positive_map=positive_map
+        )
+        
+        # 4. 打印结果
+        logger.info("--- Retrieval Recall Stats ---")
+        for k, recall in recall_results.items():
+            logger.info(f"Recall@{k}: {recall:.2f}%")
+        logger.info("------------------------------")
+    # --- 新增结束 ---
 
 
 
