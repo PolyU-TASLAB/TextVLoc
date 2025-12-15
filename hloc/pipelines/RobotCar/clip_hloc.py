@@ -1,6 +1,12 @@
+import pandas as pd 
+from groundingdino.util.inference import load_model as load_grounding_dino_model, predict as predict_grounding_dino
+import groundingdino.datasets.transforms as T
+from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForVision2Seq # <-- 核心修改：导入新类
 from sentence_transformers import SentenceTransformer, util
+from transformers import CLIPProcessor, CLIPModel, CLIPTokenizer 
+from transformers import CLIPModel as HfCLIPModel, CLIPProcessor, CLIPTokenizer
 import argparse
 import glob
 import logging
@@ -11,6 +17,7 @@ import os
 import time
 import h5py
 import torch
+from tqdm import tqdm
 from transformers import CLIPProcessor, CLIPModel # <-- 1. 确保导入
 import open_clip
 import numpy as np
@@ -205,16 +212,19 @@ def generate_query_list(dataset, image_dir, path):
 
 
 
-
 def localize_from_retrieved_poses(
-    loc_pairs_path, db_poses_gt_paths, results_path, num_loc, 
-    gt_data=None, comparison_file_path=None, cluster_analysis_file=None, **kwargs):
+    loc_pairs_path, db_poses_gt_paths, results_path,
+    # ... (其他参数保持不变) ...
+    **kwargs):
+    
     """
-    文本检索 -> 地理聚类 -> 直接使用最大簇进行定位。
+    纯文本定位：直接使用检索结果中分数最高的候选位姿。
+    此版本不使用断点续传，每次都会覆盖结果文件。
     """
-    logger.info(f"Performing text-only localization with geographic clustering from: {loc_pairs_path}")
+    logger.info(f"Performing text-only localization from: {loc_pairs_path}")
+    logger.warning("Breakpoint resume is disabled. The results file will be overwritten.")
 
-    # 1. 读取检索和精排后的结果
+    # 1. 读取检索结果 (逻辑不变)
     retrieval = {}
     with open(loc_pairs_path, 'r') as f:
         for line in f:
@@ -222,11 +232,11 @@ def localize_from_retrieved_poses(
             if len(parts) < 3:
                 continue
             qname = parts[0]
-            db_names = parts[1::2]  # 提取数据库图像名
-            scores = np.array([float(s) for s in parts[2::2]], dtype=np.float64)  # 提取分数
+            db_names = parts[1::2]
+            scores = np.array([float(s) for s in parts[2::2]], dtype=np.float64)
             retrieval[qname] = (db_names, scores)
 
-    # 2. 加载数据库图像的真值位姿
+    # 2. 加载数据库图像的真值位姿 (逻辑不变)
     db_name_to_pose = {}
     logger.info(f"Loading database poses from {len(db_poses_gt_paths)} ground truth CSV file(s)...")
     for db_path in db_poses_gt_paths:
@@ -234,6 +244,7 @@ def localize_from_retrieved_poses(
             with open(db_path, 'r', newline='') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    # 假设数据库图像名格式为 'camera_id/image_id'
                     full_image_name = f"{row['camera_id']}/{row['image_id']}"
                     tvec = np.array([row['X_enu'], row['Y_enu'], row['Z_enu']], dtype=np.float64)
                     qvec = np.array([row['quat_w'], row['quat_x'], row['quat_y'], row['quat_z']], dtype=np.float64)
@@ -243,60 +254,82 @@ def localize_from_retrieved_poses(
             continue
     logger.info(f"Loaded {len(db_name_to_pose)} database poses.")
 
-    # 3. 遍历每个查询图像，进行地理聚类
-    localized = []
-    for qname, (dbs, scores) in retrieval.items():
-        candidates = []
-        for name, score in zip(dbs, scores):
-            if name in db_name_to_pose:
-                tvec, qvec = db_name_to_pose[name]
-                candidates.append({'name': name, 'tvec': tvec, 'qvec': qvec, 'score': score})
+    # --- 核心修改：移除断点续传，使用 'w' 模式 ---
+    # 3. 以写入模式打开结果文件，并遍历所有查询
+    with open(results_path, 'w') as results_file_handle:
+        for qname, (dbs, scores) in tqdm(retrieval.items(), desc="Text-only localization (Top-1)"):
+            
+            final_tvec, final_qvec = None, None
 
-        if not candidates:
-            logger.warning(f"No valid candidates for {qname}.")
-            continue
+            # 直接选择 CLIP 全局分数最高的
+            if dbs:
+                best_db_name = dbs[0]
+                if best_db_name in db_name_to_pose:
+                    final_tvec, final_qvec = db_name_to_pose[best_db_name]
 
-        # --- 地理聚类 ---
-        logger.info(f"Performing geographic clustering for {len(candidates)} candidates of {qname}...")
-        tvecs = np.array([c['tvec'] for c in candidates])
-        from sklearn.cluster import DBSCAN
+            if final_tvec is not None and final_qvec is not None:
+                q_str = ' '.join(map(str, final_qvec))
+                t_str = ' '.join(map(str, final_tvec))
+                results_file_handle.write(f'{qname} {q_str} {t_str}\n')
+    
+    logger.info(f"Processing finished. All results saved to {results_path}")
+    # --- 修改结束 ---
 
-        # 使用 DBSCAN 进行聚类
-        clustering = DBSCAN(eps=10.0, min_samples=2).fit(tvecs)  # eps 是聚类半径，单位为米
-        labels = clustering.labels_
 
-        # 找到最大簇
-        unique_labels, counts = np.unique(labels, return_counts=True)
-        if len(unique_labels) == 0 or (len(unique_labels) == 1 and unique_labels[0] == -1):
-            logger.warning(f"No valid geographic clusters found for {qname}. Falling back to best CLIP score.")
-            best_candidate = max(candidates, key=lambda c: c['score'])
-            final_tvec, final_qvec = best_candidate['tvec'], best_candidate['qvec']
-        else:
-            # 找到最大簇的标签
-            largest_cluster_label = unique_labels[np.argmax(counts)]
-            largest_cluster = [candidates[i] for i in range(len(candidates)) if labels[i] == largest_cluster_label]
+    # # 3. 遍历每个查询图像，进行地理聚类
+    # localized = []
+    # for qname, (dbs, scores) in retrieval.items():
+    #     candidates = []
+    #     for name, score in zip(dbs, scores):
+    #         if name in db_name_to_pose:
+    #             tvec, qvec = db_name_to_pose[name]
+    #             candidates.append({'name': name, 'tvec': tvec, 'qvec': qvec, 'score': score})
 
-            # 计算最大簇的平均位置
-            cluster_tvecs = np.array([c['tvec'] for c in largest_cluster])
-            final_tvec = np.mean(cluster_tvecs, axis=0)
+    #     if not candidates:
+    #         logger.warning(f"No valid candidates for {qname}.")
+    #         continue
 
-            # 从最大簇中选择分数最高的候选作为姿态来源
-            best_in_cluster = max(largest_cluster, key=lambda c: c['score'])
-            final_qvec = best_in_cluster['qvec']
+    #     # --- 地理聚类 ---
+    #     logger.info(f"Performing geographic clustering for {len(candidates)} candidates of {qname}...")
+    #     tvecs = np.array([c['tvec'] for c in candidates])
+    #     from sklearn.cluster import DBSCAN
 
-            logger.info(f"Pose for {qname} is fused from the largest geographic cluster ({len(largest_cluster)} members).")
+    #     # 使用 DBSCAN 进行聚类
+    #     clustering = DBSCAN(eps=10.0, min_samples=2).fit(tvecs)  # eps 是聚类半径，单位为米
+    #     labels = clustering.labels_
 
-        # 保存最终结果
-        localized.append((qname, final_qvec, final_tvec))
+    #     # 找到最大簇
+    #     unique_labels, counts = np.unique(labels, return_counts=True)
+    #     if len(unique_labels) == 0 or (len(unique_labels) == 1 and unique_labels[0] == -1):
+    #         logger.warning(f"No valid geographic clusters found for {qname}. Falling back to best CLIP score.")
+    #         best_candidate = max(candidates, key=lambda c: c['score'])
+    #         final_tvec, final_qvec = best_candidate['tvec'], best_candidate['qvec']
+    #     else:
+    #         # 找到最大簇的标签
+    #         largest_cluster_label = unique_labels[np.argmax(counts)]
+    #         largest_cluster = [candidates[i] for i in range(len(candidates)) if labels[i] == largest_cluster_label]
 
-    # 4. 写入结果文件
-    with open(results_path, 'w') as f:
-        for name, q, t in localized:
-            q_str = ' '.join(map(str, q))
-            t_str = ' '.join(map(str, t))
-            f.write(f'{name} {q_str} {t_str}\n')
+    #         # 计算最大簇的平均位置
+    #         cluster_tvecs = np.array([c['tvec'] for c in largest_cluster])
+    #         final_tvec = np.mean(cluster_tvecs, axis=0)
 
-    logger.info(f"Saved {len(localized)} localized poses to {results_path}")
+    #         # 从最大簇中选择分数最高的候选作为姿态来源
+    #         best_in_cluster = max(largest_cluster, key=lambda c: c['score'])
+    #         final_qvec = best_in_cluster['qvec']
+
+    #         logger.info(f"Pose for {qname} is fused from the largest geographic cluster ({len(largest_cluster)} members).")
+
+    #     # 保存最终结果
+    #     localized.append((qname, final_qvec, final_tvec))
+
+    # # 4. 写入结果文件
+    # with open(results_path, 'w') as f:
+    #     for name, q, t in localized:
+    #         q_str = ' '.join(map(str, q))
+    #         t_str = ' '.join(map(str, t))
+    #         f.write(f'{name} {q_str} {t_str}\n')
+
+    # logger.info(f"Saved {len(localized)} localized poses to {results_path}")
 
 
 
@@ -315,8 +348,8 @@ def run(args):
     # query_dir = dataset / "allcams_downsampled_10/cam1/" 
     # mapping_dir = dataset / "mapping_allcams_downsampled_10_10"  # 使用下采样后的数据集
     # query_dir = dataset / "query_allcams_downsampled_10_10" 
-    # query_dir = dataset / "query/cam1_all/0_undistorted" ##################
-    query_dir = dataset / "query/cam1_all/half" ##################  
+    query_dir = dataset / "query/cam1_all/0_undistorted" ##################
+    # query_dir = dataset / "query/cam1_all/half" ##################  
     # query_dir = dataset / "clipdata/astri_412_down03" 
     # query_dir = dataset / "query/clip_one/"  
     # query_dir = dataset / "query/cam1_vlm_test/" 
@@ -328,7 +361,10 @@ def run(args):
     outputs = args.outputs  # 输出目录
     outputs.mkdir(exist_ok=True, parents=True)
     logger.info(f"Output directory: {outputs}")
-
+    
+    # --- 核心修复：在函数开头定义 sfm_dir ---
+    sfm_dir = outputs 
+    # --- 修复结束 ---
 
     # --- 核心修改：在这里也加入 LoRA 后缀逻辑 ---
     if args.lora_ckpt_path and args.lora_ckpt_path != 'default':
@@ -404,6 +440,7 @@ def run(args):
             logger.warning(f"回退到基础 CLIP 模型: {args.clip_model_id}")
             clip_model = CLIPModel.from_pretrained(args.clip_model_id).to(device)
             clip_processor = CLIPProcessor.from_pretrained(args.clip_model_id)
+            # --- 修复结束 ---
     else:
         # 如果根本没有提供 lora_ckpt_path 参数
         logger.info(f"未提供 LoRA 检查点。使用基础 CLIP 模型: {args.clip_model_id}")
@@ -525,8 +562,8 @@ def run(args):
     # prompts_filename = f"query_prompts_{caption_model_name}_sigclip20_one.csv"
     # prompts_filename = f"query_prompts_{caption_model_name}_sigclip10.csv" ### 长文本
     # prompts_filename = f"query_prompts_llava.csv" ### llava文本
-    # prompts_filename = f"qwen3_query_prompts_{caption_model_name}_77clip10.csv" ### 短文本
-    prompts_filename = f"half_qwen3_query_prompts_qwen-vl_77clip10.csv" 
+    prompts_filename = f"qwen3_query_prompts_{caption_model_name}_77clip10.csv" ### 短文本
+    # prompts_filename = f"half_qwen3_query_prompts_qwen-vl_77clip10.csv" 
     # prompts_csv_path = dataset / "query/cam1_all/undistorted/clipdata_sparse03/val_qwen2.csv"
     # prompts_csv_path = dataset / "clipdata/astri_412_down03/val_qwen3.csv"
     # prompts_csv_path = dataset / "query/cam1_all/0_undistorted/val_qwen2.csv"
@@ -538,6 +575,7 @@ def run(args):
 
     # ... (caption_args 的定义保持不变)
     caption_args = argparse.Namespace(
+
         query_dir=query_dir,
         output_csv=prompts_csv_path,
         model=caption_model_name, # 这里也使用来自命令行的模型名称
@@ -561,17 +599,7 @@ def run(args):
     loc_pairs = outputs / loc_pairs_filename
 
 
-    # --- 2. 预加载 DINOv2 模型 ---
-    logger.info("Pre-loading DINOv2 model for re-ranking...")
-    dino_model_id = "facebook/dinov2-base"
-    try:
-        dino_processor = AutoImageProcessor.from_pretrained(dino_model_id)
-        dino_model = AutoModel.from_pretrained(dino_model_id).to(device).eval()
-        logger.info("...DINOv2 model pre-loaded.")
-    except Exception as e:
-        logger.error(f"Failed to load DINOv2 model: {e}")
-        return
-    
+
     # --- 3. 调用 pairs_from_clip_retrieval.main ---
     t0 = time.time() # 重新计时
     pairs_from_clip_retrieval.main(
@@ -582,11 +610,14 @@ def run(args):
         # --- 仅传递 CLIP 检索相关参数 ---
         model_instance=clip_model,
         processor_instance=clip_processor,
+        # --- 修复结束 ---
         query_list_path=query_list,
+        # --- 核心修复：将召回率计算所需的真值文件路径传递下去 ---
+        positive_pairs_csv=args.positive_pairs_csv,
     )
     timings['clip_retrieval'] = time.time() - t0
 
-
+    
 
     # # 步骤 1: 提取全局描述符
     # t0 = time.time()
@@ -731,18 +762,20 @@ def run(args):
         # --- 新增结束 ---
         db_local_features = outputs / (feature_conf['output'] + '.h5')
         # --- 核心修改：调用函数时，传递几何验证所需的组件 ---
+        # --- 核心修改：调用新的 localize_from_retrieved_poses ---
         localize_from_retrieved_poses(
             loc_pairs_path=loc_pairs, 
             db_poses_gt_paths=db_poses_gt_paths,
-            results_path=results, 
-            num_loc=args.num_loc,
+            results_path=results,
+            query_prompts_csv=prompts_csv_path,
+            image_root_dir=mapping_dir,
+            clip_model=clip_model,
+            clip_processor=clip_processor,
+            device=device,
+            # --- 保持原有参数 ---
             gt_data=gt_data,
             comparison_file_path=comparison_file_path,
             cluster_analysis_file=cluster_analysis_file_path,
-            # 新增的几何验证参数
-            db_feats_path=db_local_features,
-            matcher_model=local_matcher_model,
-            matcher_conf=matcher_conf  # <-- 核心修复：在这里传入 matcher_conf
         )
         timings['pose_estimation'] = time.time() - t0
     
@@ -943,7 +976,6 @@ if __name__ == "__main__":
         help='Perform text-only localization by using the poses of retrieved DB images.'
     )
     # ---
-
 
     args = parser.parse_args()
     run(args)
