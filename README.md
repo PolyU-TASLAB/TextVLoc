@@ -19,6 +19,37 @@ The codebase is currently organized around the `SensorKit` dataset layout alread
 - Geometric localization using SuperPoint + LightGlue + `pycolmap`
 - Recall evaluation with `--positive_pairs_csv`
 
+## Text Used For Retrieval
+
+This project does not retrieve directly from raw query images. It first converts each query image into a text description, then retrieves database images with a CLIP-style model.
+
+### Inference-time text
+
+The current default inference setup uses:
+
+- caption backend: `qwen-vl`
+- actual VLM: `Qwen/Qwen3-VL-8B-Instruct`
+- generated file pattern: `qwen3_query_prompts_qwen-vl_77clip10.csv`
+
+Each query image is described with a fixed navigation-oriented prompt in [hloc/generate_captions.py](/home/wxx/CLIP_HLOC/hloc/generate_captions.py:23). The generated text is intended to be:
+
+- first-person viewpoint
+- focused on static landmarks and road structure
+- a single complete sentence
+- under 77 words
+
+This design is meant to fit CLIP-style text retrieval better than generic image captions.
+
+### Training-time text
+
+The current training script [scripts/run_clip_training_experiments.sh](/home/wxx/CLIP_HLOC/scripts/run_clip_training_experiments.sh:1) launches `train_localclip.py` with:
+
+- `--training-text-mode long`
+- `TRAIN_CSV=datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/00_train_qwen3.csv`
+- `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
+
+So the released training recipe is based on Qwen-generated long descriptions for LoRA fine-tuning, while the online localization pipeline currently uses the short `77`-word navigation descriptions for retrieval.
+
 ## Repository Layout
 
 ```text
