@@ -1,5 +1,7 @@
 # CLIP_HLOC
 
+![CLIP_HLOC Overview](overview.png)
+
 CLIP_HLOC is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). This project targets the `SensorKit` setup in this repository and combines:
 
 - VLM caption generation for query images
