@@ -1,0 +1,193 @@
+# CLIP_HLOC
+
+CLIP_HLOC is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). This project targets the `SensorKit` setup in this repository and combines:
+
+- VLM caption generation for query images
+- CLIP-style text-image retrieval
+- LoRA fine-tuning for domain adaptation
+- Optional region reranking for better retrieval quality
+- Optional geometric localization with local feature matching and PnP
+
+The codebase is currently organized around the `SensorKit` dataset layout already used in this workspace.
+
+## Features
+
+- Text-only localization from retrieved database poses
+- Retrieval with pretrained CLIP / SigLIP / MetaCLIP / LongCLIP backbones
+- LoRA-based fine-tuning in `train_localclip.py`
+- Region-aware reranking with `--enable_region_rerank`
+- Geometric localization using SuperPoint + LightGlue + `pycolmap`
+- Recall evaluation with `--positive_pairs_csv`
+
+## Repository Layout
+
+```text
+.
+├── hloc/                                  # HLOC code and CLIP_HLOC pipeline
+├── scripts/                               # training / evaluation helper scripts
+├── train_localclip.py                     # LoRA fine-tuning entrypoint
+├── requirements-clip-hloc.txt            # Python dependencies
+├── Dockerfile                             # Reproducible CUDA environment
+├── datasets/SensorKit/                    # local dataset root (not tracked)
+└── outputs/SensorKit_hloc/                # local experiment outputs (not tracked)
+```
+
+## Expected Local Data Layout
+
+This project assumes the following directories already exist locally:
+
+```text
+datasets/SensorKit/
+├── allcams/                               # database / mapping images
+├── query/cam1_all/0_undistorted/          # query images
+├── 0620_gt/
+│   ├── enu_all_mapping_gt.csv
+│   └── enu_all_query_gt.csv
+├── allcams_spatial_colmap_0630/           # COLMAP assets
+└── clipdata/                              # CLIP fine-tuning data and checkpoints
+```
+
+The default pipeline also expects an existing reference SfM model under:
+
+```text
+outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue
+```
+
+## Environment Setup
+
+### Option 1: local Python environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements-clip-hloc.txt
+```
+
+Notes:
+
+- `pycolmap` and GPU-enabled dependencies should match your CUDA / PyTorch environment.
+- Some models are downloaded from Hugging Face on first use.
+
+### Option 2: Docker
+
+```bash
+docker build -t clip_hloc .
+docker run --gpus all -it --rm \
+  -v $(pwd):/app \
+  -v /path/to/your/datasets:/app/datasets \
+  clip_hloc
+```
+
+## Training
+
+The main training entrypoint is:
+
+```bash
+bash scripts/run_clip_training_experiments.sh
+```
+
+That script currently launches `train_localclip.py` with:
+
+- text-only LoRA adaptation (`--lora-target text`)
+- long-text training mode
+- cross-attention enabled
+
+You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
+
+## Inference and Evaluation
+
+### 1. Text-only localization
+
+This mode retrieves database images from text prompts and directly uses the top retrieved database pose.
+
+```bash
+python3 -m hloc.pipelines.RobotCar.clip_hloc \
+  --dataset datasets/SensorKit \
+  --outputs outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025 \
+  --num_covis 10 \
+  --num_loc 20 \
+  --caption_model qwen-vl \
+  --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
+  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
+  --text_only_loc
+```
+
+### 2. Text-only localization with region reranking
+
+Add region reranking on top of the text retrieval stage:
+
+```bash
+python3 -m hloc.pipelines.RobotCar.clip_hloc \
+  --dataset datasets/SensorKit \
+  --outputs outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025 \
+  --num_covis 10 \
+  --num_loc 20 \
+  --caption_model qwen-vl \
+  --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
+  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
+  --text_only_loc \
+  --enable_region_rerank \
+  --region_grid 3 \
+  --region_top_k 20
+```
+
+Useful extra flags:
+
+- `--evaluate_rerank_recall`
+- `--region_top_m 2`
+- `--region_alpha 0.5`
+
+You can also run the helper script:
+
+```bash
+bash scripts/test_with_rerank.sh
+```
+
+### 3. Geometric localization with PnP
+
+To enable image-based geometric localization, remove `--text_only_loc`. The pipeline will:
+
+1. generate captions for query images
+2. retrieve candidate database images with CLIP
+3. convert retrieval results to matching pairs
+4. run SuperPoint + LightGlue matching
+5. estimate poses with `localize_sfm.main(...)`
+
+Example:
+
+```bash
+python3 -m hloc.pipelines.RobotCar.clip_hloc \
+  --dataset datasets/SensorKit \
+  --outputs outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025 \
+  --num_covis 10 \
+  --num_loc 20 \
+  --caption_model qwen-vl \
+  --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
+  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv
+```
+
+If you want both reranking and geometric localization, keep `--enable_region_rerank` and omit `--text_only_loc`.
+
+## Helper Scripts
+
+- `scripts/run_clip_training_experiments.sh`: LoRA training
+- `scripts/test_all_clip_models.sh`: compare pretrained retrieval backbones
+- `scripts/test_all_loras.sh`: sweep LoRA checkpoints
+- `scripts/test_with_rerank.sh`: evaluate region reranking
+
+## Reproducibility Notes
+
+- This repository does not track `datasets/`, `outputs/`, checkpoints, or generated features by default.
+- The current pipeline is tightly coupled to the `SensorKit` directory structure and several hard-coded paths.
+- If you plan to publish the project publicly, document how others can obtain `SensorKit` data or provide a script that rebuilds the required folder layout.
+- If you need to version checkpoints or sample outputs, use Git LFS instead of normal Git.
+
+## Acknowledgements
+
+- [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization)
+- [COLMAP](https://colmap.github.io/)
+- OpenCLIP / Hugging Face model ecosystem
