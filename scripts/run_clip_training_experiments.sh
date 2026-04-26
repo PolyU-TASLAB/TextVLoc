@@ -20,7 +20,7 @@ python3 train_localclip.py \
     --val-csv "$VAL_CSV" \
     --train-image-root-dir "$TRAIN_IMG_ROOT" \
     --val-image-root-dir "$VAL_IMG_ROOT" \
-    --out-dir "$BASE_OUT_DIR/stg2_00_qwen3_clipdata_text_mask_prepare_sparse03_remove_long_/" \
+    --out-dir "$BASE_OUT_DIR/qwen3_clipdata_text_sparse03_remove/" \
     --pretrained "datacomp_xl_s13b_b90k" \
     --training-text-mode "long" \
     --epochs "$EPOCHS" \
@@ -34,4 +34,4 @@ python3 train_localclip.py \
     --num-visual-queries 16 \
     --lambda-cross 0.3
 
-echo "Done. Outputs under $BASE_OUT_DIR/stg2_00_qwen3_clipdata_text_mask_prepare_sparse03_remove_long_/"
+echo "Done. Outputs under $BASE_OUT_DIR/qwen3_clipdata_text_sparse03_remove/"

@@ -49,6 +49,7 @@ The current training script [scripts/run_clip_training_experiments.sh](/home/wxx
 - `--training-text-mode long`
 - `TRAIN_CSV=datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/00_train_qwen3.csv`
 - `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
+- `--out-dir datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/`
 
 So the released training recipe is based on Qwen-generated long descriptions for LoRA fine-tuning, while the online localization pipeline currently uses the short `77`-word navigation descriptions for retrieval.
 
