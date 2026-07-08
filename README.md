@@ -86,6 +86,18 @@ The default pipeline also expects an existing reference SfM model under:
 outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue
 ```
 
+A minimal ENU-aligned reference SfM package for UrbanV2X fine localization is available from the GitHub Release:
+
+```bash
+wget https://github.com/xxw77777kk/CLIP_HLOC/releases/download/textvloc-urbanv2x-sfm-v1/textvloc_urbanv2x_sfm_minimal.tar.gz
+tar -xzf textvloc_urbanv2x_sfm_minimal.tar.gz
+mkdir -p outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025
+cp -r textvloc_urbanv2x_sfm_minimal/sfm_superpointmax+lightglue \
+  outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/
+```
+
+The package contains `cameras.bin`, `images.bin`, `points3D.bin`, and `model.ply`. It excludes the COLMAP `database.db`, text exports, generated features, raw images, and checkpoints.
+
 ## Environment Setup
 
 ### Option 1: local Python environment
