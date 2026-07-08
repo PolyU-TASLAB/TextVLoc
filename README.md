@@ -100,28 +100,30 @@ The package contains `cameras.bin`, `images.bin`, `points3D.bin`, and `model.ply
 
 ## Environment Setup
 
-### Option 1: local Python environment
+### Docker
+
+```bash
+docker build -t textvloc .
+docker run --gpus all -it --rm \
+  --shm-size 16g \
+  -v $(pwd):/workspace/CLIP_HLOC \
+  -w /workspace/CLIP_HLOC \
+  -e PYTHONPATH=/workspace/CLIP_HLOC \
+  textvloc bash
+```
+
+The Dockerfile installs `requirements-clip-hloc.txt`, `pycolmap==3.11.1`, and a CUDA-enabled COLMAP build. Some CLIP/VLM checkpoints are downloaded from Hugging Face on first use.
+
+### Local Python
+
+Docker is the recommended environment. If you run locally, install the Python dependencies manually and make sure PyTorch, CUDA, COLMAP, and `pycolmap` match your system:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements-clip-hloc.txt
-```
-
-Notes:
-
-- `pycolmap` and GPU-enabled dependencies should match your CUDA / PyTorch environment.
-- Some models are downloaded from Hugging Face on first use.
-
-### Option 2: Docker
-
-```bash
-docker build -t textvloc .
-docker run --gpus all -it --rm \
-  -v $(pwd):/app \
-  -v /path/to/your/datasets:/app/datasets \
-  textvloc
+pip install pycolmap==3.11.1
 ```
 
 ## Training
@@ -227,36 +229,6 @@ If you want both reranking and geometric localization, keep `--enable_region_rer
 - `scripts/test_all_loras.sh`: sweep LoRA checkpoints
 - `scripts/test_with_rerank.sh`: evaluate region reranking
 - `scripts/opposite_view/`: opposite-view retrieval protocols for Oxford RobotCar, SYNTHIA SEQS-02, and UrbanV2X
-
-## Demo Rendering
-
-You can render the localization process into a local HTML viewer and optionally an MP4 video with:
-
-```bash
-python3 tools/render_localization_demo.py \
-  --query-dir datasets/SensorKit/query/cam1_all/0_undistorted \
-  --db-dir datasets/SensorKit/allcams \
-  --reference-sfm outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue \
-  --retrieval outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/pairs-query-clip20-qwen-vl.txt \
-  --results outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/SensorKit_hloc_superpoint+superglue_clip20_qwen-vl_lora_epoch_22.txt \
-  --prompts-csv outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv \
-  --queries outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/queries_with_intrinsics.txt \
-  --output-dir outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/demo
-```
-
-This writes:
-
-- `index.html`: local browser viewer with play/pause and frame scrubbing
-- `frames/frame_*.png`: composed visualization frames
-- `manifest.json`: frame metadata for the viewer
-
-To also export a video:
-
-```bash
-python3 tools/render_localization_demo.py ... --output-dir outputs/.../demo --export-mp4 --fps 5
-```
-
-If `results_logs.pkl` is present next to `--results`, the renderer will try to add a match/inlier panel. Otherwise it falls back to retrieval + pose visualization only.
 
 ## Reproducibility Notes
 
