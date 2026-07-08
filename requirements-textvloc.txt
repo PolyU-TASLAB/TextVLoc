@@ -1,0 +1,36 @@
+torch>=1.1
+torchvision>=0.3
+numpy
+pandas
+opencv-python
+tqdm>=4.36.0
+matplotlib
+plotly
+scipy
+h5py
+pycolmap>=0.6.0
+kornia>=0.6.11
+gdown
+lightglue @ git+https://github.com/cvg/LightGlue
+
+# HLOC 原有 requirements.txt 之外的 CLIP / 多模态 / 定位扩展依赖
+# 与本地容器版本对齐，便于可复现；升级时请同步测试 TextVLoc 全流程
+
+# CLIP 与多模态
+open-clip-torch==3.1.0
+transformers==4.57.1
+accelerate
+sentence-transformers==5.1.2
+huggingface-hub
+
+# 微调
+loralib==0.1.2
+bitsandbytes
+einops
+
+# 其他常用
+timm
+ftfy
+regex
+protobuf
+safetensors

@@ -14,7 +14,8 @@ gdown
 lightglue @ git+https://github.com/cvg/LightGlue
 
 # HLOC 原有 requirements.txt 之外的 CLIP / 多模态 / 定位扩展依赖
-# 与本地容器版本对齐，便于可复现；升级时请同步测试 clip_hloc 全流程
+# Compatibility copy of requirements-textvloc.txt.
+# 与本地容器版本对齐，便于可复现；升级时请同步测试 TextVLoc 全流程
 
 # CLIP 与多模态
 open-clip-torch==3.1.0

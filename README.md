@@ -59,7 +59,7 @@ The training script now uses only the main CSV `description` field for LoRA fine
 ├── hloc/                                  # HLOC code and TextVLoc pipeline
 ├── scripts/                               # training / evaluation helper scripts
 ├── train_localclip.py                     # LoRA fine-tuning entrypoint
-├── requirements-clip-hloc.txt            # Python dependencies
+├── requirements-textvloc.txt             # Python dependencies
 ├── Dockerfile                             # Reproducible CUDA environment
 ├── datasets/SensorKit/                    # local dataset root (not tracked)
 └── outputs/SensorKit_hloc/                # local experiment outputs (not tracked)
@@ -104,7 +104,8 @@ The package contains `cameras.bin`, `images.bin`, `points3D.bin`, and `model.ply
 
 ```bash
 docker build -t textvloc .
-docker run --gpus all -it --rm \
+docker run --gpus all -it \
+  --name textvloc-dev \
   --shm-size 16g \
   -v $(pwd):/workspace/TextVLoc \
   -w /workspace/TextVLoc \
@@ -112,7 +113,7 @@ docker run --gpus all -it --rm \
   textvloc bash
 ```
 
-The Dockerfile installs `requirements-clip-hloc.txt`, `pycolmap==3.11.1`, and a CUDA-enabled COLMAP build. Some CLIP/VLM checkpoints are downloaded from Hugging Face on first use.
+The Dockerfile installs `requirements-textvloc.txt`, `pycolmap==3.11.1`, and a CUDA-enabled COLMAP build. Some CLIP/VLM checkpoints are downloaded from Hugging Face on first use.
 
 ### Local Python
 
@@ -122,7 +123,7 @@ Docker is the recommended environment. If you run locally, install the Python de
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements-clip-hloc.txt
+pip install -r requirements-textvloc.txt
 pip install pycolmap==3.11.1
 ```
 

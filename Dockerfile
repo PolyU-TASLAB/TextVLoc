@@ -1,9 +1,8 @@
 # =============================================================================
-# HLOC + CLIP-hloc 复现环境（与 my_cuda_hloc 中 pip 版本对齐，基于官方 PyTorch 镜像）
+# TextVLoc reproducibility environment, based on the official PyTorch CUDA image.
 # =============================================================================
-# 与「原版 HLOC 的 Dockerfile (colmap 底 + 再装整套 CUDA)」不同：本文件以
-#   pytorch 官方 CUDA 镜像 为基座，用 requirements-clip-hloc.txt 装齐你在
-#  容器里后装的依赖；COLMAP 固定源码提交编译安装到 /usr/local 。
+# This image installs the Python dependencies from requirements-textvloc.txt and
+# compiles a pinned CUDA-enabled COLMAP build into /usr/local.
 #
 
 
@@ -75,10 +74,10 @@ RUN git clone https://github.com/colmap/colmap.git /tmp/colmap && \
 WORKDIR /app
 
 # 仅复制依赖，便于缓存层
-COPY requirements-clip-hloc.txt ./
+COPY requirements-textvloc.txt ./
 
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements-clip-hloc.txt && \
+    pip install --no-cache-dir -r requirements-textvloc.txt && \
     pip install --no-cache-dir pycolmap==3.11.1
 
 
