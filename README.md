@@ -223,9 +223,9 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
 
 If you want both reranking and geometric localization, keep `--enable_region_rerank` and omit `--text_only_loc`.
 
-### 4. Opposite-view retrieval evaluation
+### 4. UrbanV2X opposite-view retrieval evaluation
 
-Opposite-view experiments are grouped under `scripts/opposite_view/`. They compare image-based retrieval methods such as NetVLAD, MegaLoc, CosPlace, and EigenPlaces with TextVLoc under viewpoint reversal.
+The UrbanV2X opposite-view protocol compares image-based retrieval methods such as NetVLAD, MegaLoc, CosPlace, and EigenPlaces with TextVLoc under viewpoint reversal.
 
 UrbanV2X uses `cam6` as the query stream and `cam1` as the reference/text-source stream. The provided UrbanV2X text mapping is:
 
@@ -233,7 +233,7 @@ UrbanV2X uses `cam6` as the query stream and `cam1` as the reference/text-source
 outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/seq5_stride1/cam6_query_to_cam1_front_text_qwen-vl.csv
 ```
 
-Run the UrbanV2X opposite-view protocol with:
+Run it with:
 
 ```bash
 python3 scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py \
@@ -243,35 +243,13 @@ python3 scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py \
   --center-stride 1
 ```
 
-Run the SYNTHIA SEQS-02 opposite-view protocol with:
-
-```bash
-bash scripts/opposite_view/run_synthia_seq02_opposite_view_compare.sh
-```
-
-For Oxford RobotCar, first prepare the LoST-style front/rear protocol, build the rear-view text queries from rear-view captions, and then run image-based and TextVLoc retrieval:
-
-```bash
-python3 scripts/opposite_view/prepare_lost_robotcar_opposite_view.py
-python3 scripts/opposite_view/prepare_lost_robotcar_rear_oracle_text_queries.py \
-  --prepared-dir datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified \
-  --rear-captions-csv datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified/rear_qwen3_oracle_captions.csv
-python3 scripts/opposite_view/run_lost_robotcar_retrieval_eval.py \
-  --prepared-dir datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified \
-  --out-dir outputs/SensorKit_hloc/lost_robotcar_overcast_autumn_2m_2km_rectified \
-  --methods netvlad megaloc cosplace eigenplaces
-python3 scripts/opposite_view/run_lost_robotcar_clip_text_eval.py \
-  --prepared-dir datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified \
-  --query-text-csv datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified/clip_rear_oracle_text_queries.csv
-```
-
 ## Helper Scripts
 
 - `scripts/run_clip_training_experiments.sh`: LoRA training
 - `scripts/test_all_clip_models.sh`: compare pretrained retrieval backbones
 - `scripts/test_all_loras.sh`: sweep LoRA checkpoints
 - `scripts/test_with_rerank.sh`: evaluate region reranking
-- `scripts/opposite_view/`: opposite-view retrieval protocols for Oxford RobotCar, SYNTHIA SEQS-02, and UrbanV2X
+- `scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py`: UrbanV2X opposite-view retrieval evaluation
 
 ## Reproducibility Notes
 
