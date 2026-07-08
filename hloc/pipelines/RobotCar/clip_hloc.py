@@ -3,6 +3,7 @@ import csv
 import logging
 import re
 import time
+from bisect import bisect_left
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from scipy.spatial.transform import Rotation as R_scipy
 from tqdm import tqdm
 
 from ... import (
@@ -52,6 +54,316 @@ def load_query_gt_from_csv(csv_path):
     except (FileNotFoundError, KeyError) as e:
         logger.error(f"Failed to load or parse query ground truth CSV: {e}")
         return None
+
+
+def default_query_gt_csv(dataset: Path) -> Path:
+    return dataset / "0620_gt" / "enu_all_query_gt.csv"
+
+
+def enu_all_query_gt_csv_to_tum(csv_path: Path, out_tum: Path) -> int:
+    """Convert SensorKit ENU GT CSV to TUM format: timestamp tx ty tz qx qy qz qw."""
+    rows = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            timestamp_s = float(row["timestamp_ns"]) / 1e9
+            rows.append(
+                (
+                    timestamp_s,
+                    float(row["X_enu"]),
+                    float(row["Y_enu"]),
+                    float(row["Z_enu"]),
+                    float(row["quat_x"]),
+                    float(row["quat_y"]),
+                    float(row["quat_z"]),
+                    float(row["quat_w"]),
+                )
+            )
+    rows.sort(key=lambda r: r[0])
+    out_tum.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_tum, "w", encoding="utf-8") as f:
+        f.write("# timestamp tx ty tz qx qy qz qw\n")
+        for row in rows:
+            f.write(
+                f"{row[0]:.9f} {row[1]:.6f} {row[2]:.6f} {row[3]:.6f} "
+                f"{row[4]:.6f} {row[5]:.6f} {row[6]:.6f} {row[7]:.6f}\n"
+            )
+    return len(rows)
+
+
+def convert_hloc_result_to_query_centers(
+    input_txt: Path, output_txt_with_name: Path, output_tum_txt: Path
+):
+    """
+    hloc output is world-to-camera pose: image qw qx qy qz tx ty tz.
+    Convert it to camera center in world/ENU coordinates.
+    """
+    with open(input_txt, "r", encoding="utf-8") as fin, open(
+        output_txt_with_name, "w", encoding="utf-8"
+    ) as fout_named, open(output_tum_txt, "w", encoding="utf-8") as fout_tum:
+        for line in fin:
+            parts = line.strip().split()
+            if len(parts) != 8:
+                continue
+            name, qw, qx, qy, qz, tx, ty, tz = parts
+            qw, qx, qy, qz = map(float, [qw, qx, qy, qz])
+            tvec = np.array(list(map(float, [tx, ty, tz])), dtype=np.float64)
+            rot_c2w = R_scipy.from_quat([qx, qy, qz, qw]).inv()
+            quat_c2w = rot_c2w.as_quat()
+            center = -rot_c2w.as_matrix() @ tvec
+
+            fout_named.write(
+                f"{name} {quat_c2w[0]:.6f} {quat_c2w[1]:.6f} "
+                f"{quat_c2w[2]:.6f} {quat_c2w[3]:.6f} "
+                f"{center[0]:.6f} {center[1]:.6f} {center[2]:.6f}\n"
+            )
+            match = re.search(r"(\d+)", name)
+            timestamp_s = (float(match.group(1)) / 1e9) if match else 0.0
+            fout_tum.write(
+                f"{timestamp_s:.9f} {center[0]:.6f} {center[1]:.6f} {center[2]:.6f} "
+                f"{quat_c2w[0]:.6f} {quat_c2w[1]:.6f} "
+                f"{quat_c2w[2]:.6f} {quat_c2w[3]:.6f}\n"
+            )
+    logger.info("Saved query centers:\n  %s\n  %s", output_txt_with_name, output_tum_txt)
+
+
+def convert_query_center_result_to_tum(
+    input_txt: Path, output_txt_with_name: Path, output_tum_txt: Path
+):
+    """
+    Text-only localization output stores tx ty tz as the ENU camera center already.
+    Convert directly to TUM without applying the HLOC world-to-camera transform.
+    """
+    with open(input_txt, "r", encoding="utf-8") as fin, open(
+        output_txt_with_name, "w", encoding="utf-8"
+    ) as fout_named, open(output_tum_txt, "w", encoding="utf-8") as fout_tum:
+        for line in fin:
+            parts = line.strip().split()
+            if len(parts) != 8:
+                continue
+            name, qw, qx, qy, qz, tx, ty, tz = parts
+            center = np.array(list(map(float, [tx, ty, tz])), dtype=np.float64)
+            match = re.search(r"(\d+)", name)
+            timestamp_s = (float(match.group(1)) / 1e9) if match else 0.0
+
+            fout_named.write(
+                f"{name} {float(qx):.6f} {float(qy):.6f} "
+                f"{float(qz):.6f} {float(qw):.6f} "
+                f"{center[0]:.6f} {center[1]:.6f} {center[2]:.6f}\n"
+            )
+            fout_tum.write(
+                f"{timestamp_s:.9f} {center[0]:.6f} {center[1]:.6f} {center[2]:.6f} "
+                f"{float(qx):.6f} {float(qy):.6f} "
+                f"{float(qz):.6f} {float(qw):.6f}\n"
+            )
+    logger.info("Saved query centers:\n  %s\n  %s", output_txt_with_name, output_tum_txt)
+
+
+def load_tum_file(file_path: Path):
+    data = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.strip().split()
+            if len(parts) == 8:
+                data.append([float(parts[0])] + list(map(float, parts[1:])))
+    data.sort(key=lambda row: row[0])
+    return data
+
+
+def find_nearest_index(timestamps, target_time):
+    idx = bisect_left(timestamps, target_time)
+    if idx == 0:
+        return 0
+    if idx == len(timestamps):
+        return len(timestamps) - 1
+    before = timestamps[idx - 1]
+    after = timestamps[idx]
+    return idx - 1 if abs(before - target_time) < abs(after - target_time) else idx
+
+
+def translation_errors_vs_gt(est_data, gt_data):
+    if est_data is None or gt_data is None or len(est_data) == 0 or len(gt_data) == 0:
+        return np.array([], dtype=np.float64)
+    gt_timestamps = [row[0] for row in gt_data]
+    errors = []
+    for est_row in est_data:
+        idx = find_nearest_index(gt_timestamps, est_row[0])
+        gt_pos = np.array(gt_data[idx][1:4], dtype=np.float64)
+        est_pos = np.array(est_row[1:4], dtype=np.float64)
+        errors.append(float(np.linalg.norm(est_pos - gt_pos)))
+    return np.array(errors, dtype=np.float64)
+
+
+def _gt_unit_tangents_xy(gt_data):
+    gt_xy = np.array([[row[1], row[2]] for row in gt_data], dtype=np.float64)
+    tangents = np.zeros_like(gt_xy)
+    for i in range(len(gt_xy)):
+        if len(gt_xy) == 1:
+            direction = np.array([1.0, 0.0])
+        elif i == 0:
+            direction = gt_xy[1] - gt_xy[0]
+        elif i == len(gt_xy) - 1:
+            direction = gt_xy[-1] - gt_xy[-2]
+        else:
+            direction = gt_xy[i + 1] - gt_xy[i - 1]
+        norm = float(np.linalg.norm(direction))
+        tangents[i] = direction / norm if norm > 1e-9 else np.array([1.0, 0.0])
+    left_normal = np.stack([-tangents[:, 1], tangents[:, 0]], axis=1)
+    return tangents, left_normal
+
+
+def planar_long_lat_errors_vs_gt(est_data, gt_data):
+    if est_data is None or gt_data is None or len(est_data) == 0 or len(gt_data) == 0:
+        empty = np.array([], dtype=np.float64)
+        return empty, empty, empty
+    gt_timestamps = [row[0] for row in gt_data]
+    tangents, left_normal = _gt_unit_tangents_xy(gt_data)
+    gt_xy = np.array([[row[1], row[2]] for row in gt_data], dtype=np.float64)
+    horiz, lon, lat = [], [], []
+    for est_row in est_data:
+        idx = find_nearest_index(gt_timestamps, est_row[0])
+        error_xy = np.array(est_row[1:3], dtype=np.float64) - gt_xy[idx]
+        horiz.append(float(np.linalg.norm(error_xy)))
+        lon.append(float(np.dot(error_xy, tangents[idx])))
+        lat.append(float(np.dot(error_xy, left_normal[idx])))
+    return (
+        np.array(horiz, dtype=np.float64),
+        np.array(lon, dtype=np.float64),
+        np.array(lat, dtype=np.float64),
+    )
+
+
+def save_tum_trajectory(file_path: Path, data):
+    with open(file_path, "w", encoding="utf-8") as f:
+        for row in data:
+            f.write(
+                "{:.9f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}\n".format(
+                    *row
+                )
+            )
+
+
+def match_and_filter_nearest(est_data, gt_data, threshold_m: float):
+    if len(est_data) == 0 or len(gt_data) == 0:
+        return np.array([], dtype=np.float64)
+    gt_timestamps = [row[0] for row in gt_data]
+    filtered = []
+    for est_row in est_data:
+        idx = find_nearest_index(gt_timestamps, est_row[0])
+        gt_pos = np.array(gt_data[idx][1:4], dtype=np.float64)
+        est_pos = np.array(est_row[1:4], dtype=np.float64)
+        if float(np.linalg.norm(est_pos - gt_pos)) <= threshold_m:
+            filtered.append(est_row)
+    return np.array(filtered, dtype=np.float64)
+
+
+def write_traj_eval_metrics(
+    metrics_path: Path,
+    title: str,
+    translation_3d: np.ndarray,
+    horizontal: np.ndarray,
+    longitudinal: np.ndarray,
+    lateral: np.ndarray,
+):
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        f.write(title + "\n\n")
+        if translation_3d.size:
+            f.write(
+                "3D translation (m): "
+                f"mean={np.mean(translation_3d):.3f} "
+                f"median={np.median(translation_3d):.3f} "
+                f"max={np.max(translation_3d):.3f} "
+                f"rmse={np.sqrt(np.mean(translation_3d**2)):.3f} "
+                f"n={len(translation_3d)}\n"
+            )
+        if horizontal.size:
+            f.write(
+                "Horizontal E-N (m): "
+                f"mean={np.mean(horizontal):.3f} "
+                f"median={np.median(horizontal):.3f} "
+                f"max={np.max(horizontal):.3f} "
+                f"rmse={np.sqrt(np.mean(horizontal**2)):.3f}\n"
+            )
+            f.write(
+                "Lateral |cross-track| (m): "
+                f"mean_abs={np.mean(np.abs(lateral)):.3f} "
+                f"median_abs={np.median(np.abs(lateral)):.3f} "
+                f"max_abs={np.max(np.abs(lateral)):.3f} "
+                f"rmse_signed={np.sqrt(np.mean(lateral**2)):.3f}\n"
+            )
+            f.write(
+                "Longitudinal |along-track| (m): "
+                f"mean_abs={np.mean(np.abs(longitudinal)):.3f} "
+                f"median_abs={np.median(np.abs(longitudinal)):.3f} "
+                f"max_abs={np.max(np.abs(longitudinal)):.3f} "
+                f"rmse_signed={np.sqrt(np.mean(longitudinal**2)):.3f}\n"
+            )
+
+
+def run_traj_eval(
+    results_txt: Path,
+    outputs: Path,
+    gt_csv: Path,
+    filter_dist_m: float,
+    results_are_query_centers: bool = False,
+):
+    stem = results_txt.stem
+    eval_dir = outputs / "traj_eval"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    centers_named = eval_dir / f"{stem}_query_centers_named.txt"
+    centers_tum = eval_dir / f"{stem}_query_centers_tum.txt"
+    gt_tum = eval_dir / "enu_all_query_gt.tum"
+    filtered_tum = eval_dir / f"{stem}_query_centers_tum_filtered_{filter_dist_m:.1f}m.txt"
+
+    if results_are_query_centers:
+        convert_query_center_result_to_tum(results_txt, centers_named, centers_tum)
+    else:
+        convert_hloc_result_to_query_centers(results_txt, centers_named, centers_tum)
+    n_gt = enu_all_query_gt_csv_to_tum(gt_csv, gt_tum)
+    logger.info("Wrote %d GT poses to %s", n_gt, gt_tum)
+
+    est_data = load_tum_file(centers_tum)
+    gt_data = load_tum_file(gt_tum)
+    if len(est_data) == 0 or len(gt_data) == 0:
+        logger.warning("Trajectory eval skipped: empty estimated trajectory or GT.")
+        return
+
+    errors = translation_errors_vs_gt(est_data, gt_data)
+    horizontal, longitudinal, lateral = planar_long_lat_errors_vs_gt(est_data, gt_data)
+    logger.info(
+        "Trajectory error vs GT (m): mean=%.3f median=%.3f max=%.3f rmse=%.3f n=%d",
+        float(np.mean(errors)),
+        float(np.median(errors)),
+        float(np.max(errors)),
+        float(np.sqrt(np.mean(errors**2))),
+        len(errors),
+    )
+    metrics_path = eval_dir / f"{stem}_metrics.txt"
+    write_traj_eval_metrics(
+        metrics_path,
+        f"{stem}: localization result vs nearest GT timestamp",
+        errors,
+        horizontal,
+        longitudinal,
+        lateral,
+    )
+
+    filtered = match_and_filter_nearest(est_data, gt_data, filter_dist_m)
+    save_tum_trajectory(filtered_tum, filtered)
+    filtered_errors = translation_errors_vs_gt(filtered, gt_data)
+    if filtered_errors.size:
+        logger.info(
+            "Post-filter (%.1fm) translation error (m): mean=%.3f median=%.3f rmse=%.3f n=%d",
+            filter_dist_m,
+            float(np.mean(filtered_errors)),
+            float(np.median(filtered_errors)),
+            float(np.sqrt(np.mean(filtered_errors**2))),
+            len(filtered_errors),
+        )
+    logger.info("Trajectory eval outputs saved under %s", eval_dir)
 
 
 def convert_retrieval_to_pairs(retrieval_path, pairs_path):
@@ -917,6 +1229,7 @@ def extract_vision_patch_tokens_any(model, images: torch.Tensor, device="cuda", 
         if apply_projection and hasattr(model.visual, 'proj') and model.visual.proj is not None:
             B, N, D = patch_tokens.shape
             patch_tokens_flat = patch_tokens.reshape(B * N, D)
+       
             patch_tokens_proj = patch_tokens_flat @ model.visual.proj
             patch_tokens = patch_tokens_proj.reshape(B, N, -1)
         
@@ -1180,6 +1493,26 @@ def run(args):
     loc_pairs = outputs / f"pairs-query-clip{args.num_loc}_{lora_suffix}.txt"
     results = outputs / f"SensorKit_hloc_superpoint+superglue_clip{args.num_loc}_{args.caption_model}_{lora_suffix}.txt"
     # --- 修改结束 ---
+
+    if getattr(args, "eval_only", False):
+        eval_results = args.results if args.results is not None else results
+        gt_csv = Path(args.gt_csv) if args.gt_csv else default_query_gt_csv(dataset)
+        if not eval_results.is_file():
+            raise FileNotFoundError(f"--eval-only: localization results not found: {eval_results}")
+        if not gt_csv.is_file():
+            raise FileNotFoundError(f"--eval-only: GT CSV not found: {gt_csv}")
+        run_traj_eval(
+            eval_results,
+            outputs,
+            gt_csv,
+            args.filter_dist_m,
+            results_are_query_centers=(
+                getattr(args, "text_only_loc", False)
+                or getattr(args, "results_are_query_centers", False)
+            ),
+        )
+        logger.info("Eval-only finished.")
+        return
 
     query_list = outputs / "queries_with_intrinsics.txt"
     # reference_sfm = outputs / "sfm_superpointmax+lightglue"
@@ -1860,6 +2193,9 @@ def run(args):
     
     # 步骤 3: 提取局部特征
     t0 = time.time()
+    db_local_features = extract_features.main(
+        feature_conf, mapping_dir, outputs, as_half=True
+    )
     # query_local_feats_path = outputsba / "query-local-feats.h5"
     query_local_feats_path = outputs / "query-local-feats.h5"
     features = extract_features.main(
@@ -2018,6 +2354,21 @@ def run(args):
         )
         timings['pose_estimation'] = time.time() - t0
     # --- 修改结束 ---
+
+    if not getattr(args, "skip_post_eval", False):
+        gt_csv = Path(args.gt_csv) if args.gt_csv else default_query_gt_csv(dataset)
+        if results.is_file() and gt_csv.is_file():
+            run_traj_eval(
+                results,
+                outputs,
+                gt_csv,
+                args.filter_dist_m,
+                results_are_query_centers=getattr(args, "text_only_loc", False),
+            )
+        elif not results.is_file():
+            logger.warning("定位结果文件未找到，跳过轨迹评估: %s", results)
+        else:
+            logger.warning("真值 CSV 未找到，跳过轨迹评估: %s（可用 --gt-csv 指定）", gt_csv)
 
 
 
@@ -2225,6 +2576,40 @@ if __name__ == "__main__":
     )
     # ---
 
+    parser.add_argument(
+        "--gt-csv",
+        type=Path,
+        default=None,
+        help="轨迹评估用真值 CSV；默认使用 dataset/0620_gt/enu_all_query_gt.csv。",
+    )
+    parser.add_argument(
+        "--filter-dist-m",
+        type=float,
+        default=10.0,
+        help="轨迹评估后按最近 GT 距离过滤离群帧的阈值，单位米。",
+    )
+    parser.add_argument(
+        "--skip-post-eval",
+        action="store_true",
+        help="跳过定位结果 txt 转换和 GT 轨迹误差评估。",
+    )
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="不跑定位，只处理已有定位结果 txt 并和 GT 做轨迹误差评估。",
+    )
+    parser.add_argument(
+        "--results",
+        type=Path,
+        default=None,
+        help="与 --eval-only 连用：指定已有定位结果 txt；默认使用当前参数推导出的 results 文件名。",
+    )
+    parser.add_argument(
+        "--results-are-query-centers",
+        action="store_true",
+        help="与 --eval-only 连用：结果 txt 的 tx ty tz 已经是 ENU 相机中心，不再做 HLOC 位姿转换。",
+    )
+
     # --- 新增 --text_only_loc 参数 ---
     parser.add_argument(
         '--text_only_loc', 
@@ -2235,4 +2620,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     run(args)
-

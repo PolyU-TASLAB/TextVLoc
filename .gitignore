@@ -126,12 +126,18 @@ outputs/SensorKit_hloc/*
 outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/*
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/README.md
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/.gitkeep
+!outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/
 outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/*
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/.gitkeep
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/txt/
 outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/txt/*
 !outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue/txt/.gitkeep
+!outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/
+outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/*
+!outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/seq5_stride1/
+outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/seq5_stride1/*
+!outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/seq5_stride1/cam6_query_to_cam1_front_text_qwen-vl.csv
 
 *.log
 *.h5

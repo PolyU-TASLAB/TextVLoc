@@ -46,12 +46,11 @@ This design is meant to fit CLIP-style text retrieval better than generic image 
 
 The current training script [scripts/run_clip_training_experiments.sh](/home/wxx/CLIP_HLOC/scripts/run_clip_training_experiments.sh:1) launches `train_localclip.py` with:
 
-- `--training-text-mode long`
 - `TRAIN_CSV=datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/00_train_qwen3.csv`
 - `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
 - `--out-dir datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/`
 
-So the released training recipe is based on Qwen-generated long descriptions for LoRA fine-tuning, while the online localization pipeline currently uses the short `77`-word navigation descriptions for retrieval.
+The training script now uses only the main CSV `description` field for LoRA fine-tuning, while the online localization pipeline currently uses the short `77`-word navigation descriptions for retrieval.
 
 ## Repository Layout
 
@@ -124,7 +123,7 @@ bash scripts/run_clip_training_experiments.sh
 That script currently launches `train_localclip.py` with:
 
 - text-only LoRA adaptation (`--lora-target text`)
-- long-text training mode
+- main CSV descriptions as the only training text source
 - cross-attention enabled
 
 You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
@@ -212,6 +211,37 @@ If you want both reranking and geometric localization, keep `--enable_region_rer
 - `scripts/test_all_clip_models.sh`: compare pretrained retrieval backbones
 - `scripts/test_all_loras.sh`: sweep LoRA checkpoints
 - `scripts/test_with_rerank.sh`: evaluate region reranking
+- `scripts/opposite_view/`: opposite-view retrieval protocols for Oxford RobotCar, SYNTHIA SEQS-02, and UrbanV2X
+
+## Demo Rendering
+
+You can render the localization process into a local HTML viewer and optionally an MP4 video with:
+
+```bash
+python3 tools/render_localization_demo.py \
+  --query-dir datasets/SensorKit/query/cam1_all/0_undistorted \
+  --db-dir datasets/SensorKit/allcams \
+  --reference-sfm outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+lightglue \
+  --retrieval outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/pairs-query-clip20-qwen-vl.txt \
+  --results outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/SensorKit_hloc_superpoint+superglue_clip20_qwen-vl_lora_epoch_22.txt \
+  --prompts-csv outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv \
+  --queries outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/queries_with_intrinsics.txt \
+  --output-dir outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/demo
+```
+
+This writes:
+
+- `index.html`: local browser viewer with play/pause and frame scrubbing
+- `frames/frame_*.png`: composed visualization frames
+- `manifest.json`: frame metadata for the viewer
+
+To also export a video:
+
+```bash
+python3 tools/render_localization_demo.py ... --output-dir outputs/.../demo --export-mp4 --fps 5
+```
+
+If `results_logs.pkl` is present next to `--results`, the renderer will try to add a match/inlier panel. Otherwise it falls back to retrieval + pose visualization only.
 
 ## Reproducibility Notes
 

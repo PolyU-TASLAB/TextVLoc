@@ -22,82 +22,44 @@ def set_seed(seed: int = 42):
 
 class CsvDataset(Dataset):
     """
-    加载图文对。支持 long / short / mixed（主 CSV 的 description + 可选 short CSV）。
+    加载图文对，只使用主 CSV 中的 description 作为训练/验证文本。
     """
-    def __init__(self, csv_path: Path, preprocess, image_root_dir: Path,
-                 short_csv_path: Optional[Path] = None,
-                 training_text_mode: str = 'long',
-                 for_hf=False):
+    def __init__(self, csv_path: Path, preprocess, image_root_dir: Path, for_hf=False):
         df = pd.read_csv(csv_path)
         assert 'image_name' in df.columns and 'description' in df.columns, \
             f"主CSV文件 {csv_path} 必须包含 'image_name' 和 'description' 列。"
 
-        self.use_short_desc = False
-        if short_csv_path:
-            logger.info(f"正在加载短描述文件: {short_csv_path}")
-            short_df = pd.read_csv(short_csv_path)
-            assert 'image_name' in short_df.columns and 'description' in short_df.columns, \
-                f"短描述CSV文件 {short_csv_path} 必须包含 'image_name' 和 'description' 列。"
-            short_df = short_df.rename(columns={'description': 'short_description'})
-            df = pd.merge(df, short_df[['image_name', 'short_description']], on='image_name', how='inner')
-            logger.info(f"成功合并 {len(df)} 个图文对进行混合训练。")
-            self.use_short_desc = True
-
         self.paths = [image_root_dir.joinpath(p) for p in df['image_name']]
-        self.long_texts = df['description'].tolist()
-        if self.use_short_desc:
-            self.short_texts = df['short_description'].tolist()
+        self.texts = df['description'].tolist()
 
         self.preprocess = preprocess
         self.for_hf = for_hf
-        self.mode = training_text_mode
-        if self.mode == 'short' and not self.use_short_desc:
-            raise ValueError("--training-text-mode 'short' 需要提供 --train-short-csv 文件。")
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, i):
-        text_to_return = None
-        if self.mode == 'mixed':
-            text_to_return = (self.long_texts[i], self.short_texts[i])
-        elif self.mode == 'short':
-            text_to_return = self.short_texts[i]
-        else:
-            text_to_return = self.long_texts[i]
-
         try:
             img = Image.open(self.paths[i]).convert("RGB")
             processed_img = img if self.for_hf else self.preprocess(img)
-            return processed_img, text_to_return, i
+            return processed_img, self.texts[i], i
         except Exception:
-            return None, text_to_return, i
+            return None, self.texts[i], i
 
 
 def collate_fn(batch):
-    """丢弃读图失败样本；文本统一为 (list, [], []) 供训练循环解包。"""
+    """丢弃读图失败样本；文本统一为简单的 list[str]。"""
     batch = [b for b in batch if b[0] is not None]
     if not batch:
-        return None, ([], [], []), None
+        return None, [], None
 
     imgs, texts, idxs = zip(*batch)
-
-    if isinstance(texts[0], tuple):
-        num_parts = len(texts[0])
-        if num_parts == 2:
-            list1, list2 = zip(*texts)
-            texts_to_return = (list(list1), list(list2), [])
-        else:
-            raise ValueError(f"未知的文本元组格式，包含 {num_parts} 个元素。")
-    else:
-        texts_list = list(texts)
-        texts_to_return = (texts_list, [], [])
     
     try:
         imgs_stacked = torch.stack(imgs, dim=0)
-        return imgs_stacked, texts_to_return, torch.tensor(idxs, dtype=torch.long)
+        return imgs_stacked, list(texts), torch.tensor(idxs, dtype=torch.long)
     except TypeError: 
-        return list(imgs), texts_to_return, torch.tensor(idxs, dtype=torch.long)
+        return list(imgs), list(texts), torch.tensor(idxs, dtype=torch.long)
 
 def _replace_linear_with_lora_linear(mod: nn.Linear, r=8, alpha=16, dropout=0.0):
     """用 loralib.Linear 替换一个 nn.Linear 层，并复制权重。"""
@@ -200,8 +162,7 @@ def evaluate(model, val_loader, tokenizer, device, args, cross_attn_module=None)
         if imgs is None: 
             continue
         imgs = imgs.to(device, non_blocking=True)
-        long_texts = texts[0]
-        toks = tokenizer(long_texts).to(device)
+        toks = tokenizer(texts).to(device)
 
         zi_global = F.normalize(model.encode_image(imgs), dim=-1)
         zt = F.normalize(model.encode_text(toks), dim=-1)
@@ -211,13 +172,8 @@ def evaluate(model, val_loader, tokenizer, device, args, cross_attn_module=None)
 
         if cross_attn_module is not None:
             vision_patches = extract_vision_patch_tokens(model, imgs)
-            
-            if args.cross_attn_type == 'full':
-                visual_summary, _ = cross_attn_module(zt, vision_patches)
-                visual_summary_pooled = F.normalize(visual_summary.mean(dim=1), dim=-1)
-            else:  # token_select
-                selected_patches = cross_attn_module(zt, vision_patches)
-                visual_summary_pooled = F.normalize(selected_patches.mean(dim=1), dim=-1)
+            visual_summary, _ = cross_attn_module(zt, vision_patches)
+            visual_summary_pooled = F.normalize(visual_summary.mean(dim=1), dim=-1)
             
             all_I_cross.append(visual_summary_pooled)
 
@@ -255,11 +211,11 @@ def evaluate_hf_baseline(hf_model_id, val_ds, device, args):
 
     hf_model.eval()
     all_I, all_T = [], []
-    for imgs, (long_texts, _, _), _ in tqdm(hf_val_loader, desc="Evaluating (Hugging Face)"):
+    for imgs, texts, _ in tqdm(hf_val_loader, desc="Evaluating (Hugging Face)"):
         if imgs is None:
             continue
         inputs = hf_processor(
-            text=long_texts, images=imgs, return_tensors="pt", padding=True, truncation=True
+            text=texts, images=imgs, return_tensors="pt", padding=True, truncation=True
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -347,31 +303,6 @@ class TextGuidedVisualAttention(nn.Module):
         queries = self.norm2(queries + self.ffn(queries))
         return self.output_proj(queries), attn_weights
 
-class TokenSelectionModule(nn.Module):
-    """按与文本相似度对视觉 patch 做 top-k，再投影回文本维。"""
-    def __init__(
-        self,
-        text_dim: int,
-        vision_dim: int,
-        top_k: int = 16,
-    ):
-        super().__init__()
-        self.top_k = top_k
-        self.text_proj = nn.Linear(text_dim, vision_dim)
-        self.output_proj = nn.Linear(vision_dim, text_dim)
-        
-    def forward(self, text_feats: torch.Tensor, vision_patches: torch.Tensor) -> torch.Tensor:
-        text_proj = F.normalize(self.text_proj(text_feats), dim=-1)
-        vision_norm = F.normalize(vision_patches, dim=-1)
-        sim = torch.einsum('bnd,bd->bn', vision_norm, text_proj)
-        _, top_indices = sim.topk(k=self.top_k, dim=1)
-        selected = torch.gather(
-            vision_patches,
-            dim=1,
-            index=top_indices.unsqueeze(-1).expand(-1, -1, vision_patches.size(-1)),
-        )
-        return self.output_proj(selected)
-
 class LightweightReranker(nn.Module):
     """文本 query + patch KV 的轻量 MHA，输出标量排序分。"""
     def __init__(
@@ -444,47 +375,6 @@ def extract_vision_patch_tokens(model, images: torch.Tensor) -> torch.Tensor:
     x = x.permute(1, 0, 2)
     return x[:, 1:, :]
 
-class MIL_InfoNCE_Loss(nn.Module):
-    """Patch–文本 MIL 风格对比：对 patch 维做 max/logsumexp/mean 聚合再对称 CE。"""
-    def __init__(
-        self,
-        temperature: float = 0.07,
-        aggregation: str = "logsumexp",
-        vision_proj: Optional[nn.Module] = None,
-    ):
-        super().__init__()
-        self.temperature = temperature
-        self.aggregation = aggregation
-        self.vision_proj = vision_proj
-        
-        logger.info(f"MIL Loss: aggregation={aggregation}, temp={temperature}")
-    
-    def aggregate_patch_scores(self, patch_text_sims: torch.Tensor) -> torch.Tensor:
-        if self.aggregation == "max":
-            return patch_text_sims.max(dim=1).values
-        if self.aggregation == "logsumexp":
-            return torch.logsumexp(patch_text_sims / self.temperature, dim=1)
-        if self.aggregation == "mean":
-            return patch_text_sims.mean(dim=1)
-        raise ValueError(f"Unknown aggregation: {self.aggregation}")
-
-    def forward(self, vision_patches: torch.Tensor, text_embeddings: torch.Tensor) -> torch.Tensor:
-        B, _, D_vision = vision_patches.shape
-        D_text = text_embeddings.size(1)
-        if D_vision != D_text:
-            if self.vision_proj is None:
-                raise ValueError(
-                    f"Vision dim ({D_vision}) != Text dim ({D_text}), but no projection layer provided!"
-                )
-            vision_patches = self.vision_proj(vision_patches)
-        vision_patches = F.normalize(vision_patches, dim=-1)
-        patch_text_sims = vision_patches @ text_embeddings.t()
-        logits = self.aggregate_patch_scores(patch_text_sims)
-        labels = torch.arange(B, device=logits.device)
-        loss_i2t = F.cross_entropy(logits / self.temperature, labels)
-        loss_t2i = F.cross_entropy(logits.t() / self.temperature, labels)
-        return (loss_i2t + loss_t2i) / 2
-
 def main():
     ap = argparse.ArgumentParser(description="Fine-tune CLIP with LoRA for image-text retrieval.")
     ap.add_argument('--train-csv', type=Path, required=True)
@@ -494,9 +384,6 @@ def main():
     ap.add_argument('--out-dir', type=Path, required=True)
     ap.add_argument('--model-name', type=str, default='ViT-L-14')
     ap.add_argument('--pretrained', type=str, default='datacomp_xl_s13b_b90k')
-    ap.add_argument('--training-text-mode', type=str, default='long', choices=['mixed', 'long', 'short'],
-                    help="训练文本: long / short / mixed（mixed 需 --train-short-csv）。")
-
     ap.add_argument('--hf-model-id', type=str, default='laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K', help="用于基线比较的 Hugging Face 模型 ID。")
     ap.add_argument('--epochs', type=int, default=5)
     ap.add_argument('--batch-size', type=int, default=64)
@@ -512,27 +399,15 @@ def main():
     ap.add_argument('--eval-k', nargs='+', type=int, default=[1, 5, 10, 20])
     ap.add_argument('--lora-target', type=str, default='all', choices=['all', 'text', 'vision'],
                     help="指定 LoRA 注入的目标: 'all', 'text', 或 'vision'。")
-    ap.add_argument('--train-short-csv', type=Path, default=None, help="可选的、包含简短描述的训练CSV文件。")
 
     ap.add_argument('--use-cross-attn', action='store_true',
                     help="Enable text-guided visual attention module")
-    ap.add_argument('--cross-attn-type', type=str, default='full',
-                    choices=['full', 'token_select'],
-                    help="Type of visual attention: 'full' (cross-attn) or 'token_select' (lightweight)")
     ap.add_argument('--num-visual-queries', type=int, default=8,
                     help="Number of visual summary tokens in cross-attention")
     ap.add_argument('--lambda-cross', type=float, default=0.5,
                     help="Weight for cross-attention loss")
     ap.add_argument('--gradient-accumulation-steps', type=int, default=1,
                     help="Number of gradient accumulation steps (effective_batch_size = batch_size × this)")
-
-    ap.add_argument('--use-mil-loss', action='store_true',
-                    help="Enable MIL (Multiple Instance Learning) contrastive loss")
-    ap.add_argument('--mil-aggregation', type=str, default='logsumexp',
-                    choices=['max', 'logsumexp', 'mean'],
-                    help="Aggregation method for MIL loss")
-    ap.add_argument('--lambda-mil', type=float, default=1.0,
-                    help="Weight for MIL loss (default: 1.0)")
 
     rerank_group = ap.add_argument_group('Reranker Settings')
     rerank_group.add_argument('--use-reranker', action='store_true',
@@ -586,23 +461,15 @@ def main():
     
     cross_attn_module = None
     if args.use_cross_attn:
-        if args.cross_attn_type == 'full':
-            cross_attn_module = TextGuidedVisualAttention(
-                text_dim=text_dim,
-                vision_dim=vision_dim,
-                hidden_dim=512,
-                num_queries=args.num_visual_queries,
-                num_heads=8,
-                dropout=0.5,
-            ).to(device)
-            logger.info(f"Cross-Attention: text={text_dim}, vision={vision_dim}")
-        else:
-            cross_attn_module = TokenSelectionModule(
-                text_dim=text_dim,
-                vision_dim=vision_dim,
-                top_k=args.num_visual_queries,
-            ).to(device)
-            logger.info(f"Token Selection: text={text_dim}, vision={vision_dim}")
+        cross_attn_module = TextGuidedVisualAttention(
+            text_dim=text_dim,
+            vision_dim=vision_dim,
+            hidden_dim=512,
+            num_queries=args.num_visual_queries,
+            num_heads=8,
+            dropout=0.5,
+        ).to(device)
+        logger.info(f"Cross-Attention: text={text_dim}, vision={vision_dim}")
 
     reranker_module = None
     if args.use_reranker:
@@ -638,15 +505,12 @@ def main():
         csv_path=args.train_csv, 
         preprocess=preprocess, 
         image_root_dir=args.train_image_root_dir,
-        short_csv_path=args.train_short_csv,
-        training_text_mode=args.training_text_mode
     )
 
     val_ds = CsvDataset(
         csv_path=args.val_csv, 
         preprocess=preprocess, 
         image_root_dir=args.val_image_root_dir,
-        training_text_mode='long'
     )
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True, collate_fn=collate_fn)
@@ -658,27 +522,9 @@ def main():
         msg = " | ".join([f"{k}={v*100:.2f}%" for k,v in baseline_metrics.items()])
         print(f"-> [OpenCLIP Baseline] {msg}\n")
 
-    mil_loss_fn = None
-    vision_proj_for_mil = None
-
-    if args.use_mil_loss:
-        if vision_dim != text_dim:
-            vision_proj_for_mil = nn.Linear(vision_dim, text_dim).to(device)
-            logger.info(f"MIL: Created vision projection {vision_dim} -> {text_dim}")
-        
-        mil_loss_fn = MIL_InfoNCE_Loss(
-            temperature=0.07,
-            aggregation=args.mil_aggregation,
-            vision_proj=vision_proj_for_mil
-        ).to(device)
-        
-        logger.info(f"MIL Loss enabled with {args.mil_aggregation} aggregation")
-
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if cross_attn_module is not None:
         trainable_params += list(cross_attn_module.parameters())
-    if vision_proj_for_mil is not None:
-        trainable_params += list(vision_proj_for_mil.parameters())
     if reranker_module is not None:
         trainable_params += list(reranker_module.parameters())
 
@@ -686,8 +532,8 @@ def main():
     scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
 
     print(
-        f"Starting training in '{args.training_text_mode}' mode "
-        f"(cross_attn={args.use_cross_attn}, context_length={model.context_length})."
+        f"Starting training with main CSV descriptions "
+        f"(cross_attn={args.use_cross_attn}, reranker={args.use_reranker}, context_length={model.context_length})."
     )
 
     for epoch in range(1, args.epochs + 1):
@@ -709,10 +555,8 @@ def main():
             with torch.cuda.amp.autocast(enabled=args.use_amp):
                 img_global = F.normalize(model.encode_image(imgs), dim=-1)
 
-                long_texts, _, _ = texts
-
-                long_toks = tokenizer(long_texts).to(device)
-                txt_global = F.normalize(model.encode_text(long_toks), dim=-1)
+                toks = tokenizer(texts).to(device)
+                txt_global = F.normalize(model.encode_text(toks), dim=-1)
 
                 sim_global = torch.exp(model.logit_scale) * (img_global @ txt_global.t())
                 labels = torch.arange(sim_global.size(0), device=device)
@@ -723,21 +567,10 @@ def main():
 
                 loss = loss_global
 
-                if mil_loss_fn is not None:
-                    vision_patches = extract_vision_patch_tokens(model, imgs)
-                    loss_mil = mil_loss_fn(vision_patches, txt_global)
-                    loss = loss + args.lambda_mil * loss_mil
-                
                 if cross_attn_module is not None:
-                    if 'vision_patches' not in locals() or vision_patches is None:
-                        vision_patches = extract_vision_patch_tokens(model, imgs)
-
-                    if args.cross_attn_type == 'full':
-                        visual_summary, _ = cross_attn_module(txt_global, vision_patches)
-                        visual_summary_pooled = F.normalize(visual_summary.mean(dim=1), dim=-1)
-                    else:
-                        selected_patches = cross_attn_module(txt_global, vision_patches)
-                        visual_summary_pooled = F.normalize(selected_patches.mean(dim=1), dim=-1)
+                    vision_patches = extract_vision_patch_tokens(model, imgs)
+                    visual_summary, _ = cross_attn_module(txt_global, vision_patches)
+                    visual_summary_pooled = F.normalize(visual_summary.mean(dim=1), dim=-1)
 
                     sim_cross = torch.exp(model.logit_scale) * (visual_summary_pooled @ txt_global.t())
                     loss_cross = 0.5 * (
@@ -748,7 +581,7 @@ def main():
                     loss = loss + args.lambda_cross * loss_cross
 
                 if reranker_module is not None:
-                    if 'vision_patches' not in locals() or vision_patches is None:
+                    if cross_attn_module is None:
                         vision_patches = extract_vision_patch_tokens(model, imgs)
 
                     pos_scores = reranker_module(txt_global, vision_patches)
@@ -784,9 +617,6 @@ def main():
                     'L_global': f"{loss_global.item():.3f}",
                     'avg_loss': f"{(total_loss/step):.4f}"
                 }
-                
-                if mil_loss_fn is not None:
-                    postfix_dict['L_mil'] = f"{loss_mil.item():.3f}"
 
                 if cross_attn_module is not None:
                     postfix_dict['L_cross'] = f"{loss_cross.item():.3f}"
@@ -827,12 +657,8 @@ def main():
         
         if cross_attn_module is not None:
             checkpoint['cross_attn_state'] = cross_attn_module.state_dict()
-            checkpoint['cross_attn_type'] = args.cross_attn_type
+            checkpoint['cross_attn_type'] = 'full'
             checkpoint['num_visual_queries'] = args.num_visual_queries
-
-        if vision_proj_for_mil is not None:
-            checkpoint['mil_vision_proj'] = vision_proj_for_mil.state_dict()
-            checkpoint['mil_aggregation'] = args.mil_aggregation
         
         if reranker_module is not None:
             checkpoint['reranker_state'] = reranker_module.state_dict()
@@ -844,4 +670,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

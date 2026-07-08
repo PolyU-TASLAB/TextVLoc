@@ -1546,8 +1546,7 @@ def load_finetuned_model(ckpt_path: Path, device: str):
     from train_localclip import (
         get_model_dimensions,
         inject_lora_openclip,
-        TextGuidedVisualAttention,
-        TokenSelectionModule
+        TextGuidedVisualAttention
     )
     
     logger.info(f"📦 Loading model from checkpoint: {ckpt_path}")
@@ -1595,6 +1594,14 @@ def load_finetuned_model(ckpt_path: Path, device: str):
                 dropout=0.1
             )
         else:
+            try:
+                from train_localclip import TokenSelectionModule
+            except ImportError as exc:
+                raise ImportError(
+                    "Checkpoint requires TokenSelectionModule, but train_localclip.py "
+                    "does not define it."
+                ) from exc
+
             cross_attn_module = TokenSelectionModule(
                 text_dim=text_dim,
                 vision_dim=vision_dim,
@@ -2228,7 +2235,6 @@ if __name__ == "__main__":
         exclude_cameras=args.exclude_cameras,
         filter_self_match=args.filter_self_match,
     )
-
 
 
 

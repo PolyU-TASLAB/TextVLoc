@@ -134,7 +134,8 @@ def pose_from_cluster(
             "points3D_xyz": None,
             "num_matches": 0,
             "keypoint_index_to_db": ([], []),
-        }, timings
+            "timings": timings,
+        }
 
     ret = localizer.localize(kpq, mkp_idxs, mp3d_ids, query_camera, **kwargs)
     timings["PnP"] = time.time() - t0
