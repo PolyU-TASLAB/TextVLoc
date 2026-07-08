@@ -166,7 +166,7 @@ def encode_texts(
         feature_path.unlink()
 
     with h5py.File(feature_path, "w", libver="latest") as h5:
-        for start in tqdm(range(0, len(names), batch_size), desc="Encoding T-ReLoc texts"):
+        for start in tqdm(range(0, len(names), batch_size), desc="Encoding TextVLoc texts"):
             batch_names = names[start : start + batch_size]
             batch_texts = texts[start : start + batch_size]
             tokens = processor(batch_texts).to(device)
@@ -328,11 +328,11 @@ def main() -> None:
         overwrite=args.overwrite,
     )
     db_desc = load_clip_image_matrix(args.clip_db_features, db_names)
-    rows = evaluate("T-ReLoc", query_names, query_desc, db_names, db_desc, poses, result_dir, args.sequence_length, args.center_stride)
+    rows = evaluate("TextVLoc", query_names, query_desc, db_names, db_desc, poses, result_dir, args.sequence_length, args.center_stride)
     rows_all.extend(rows)
     for row in rows:
         print(
-            f"T-ReLoc K={row['K']} R5={row['R@5m']:.2f} R10={row['R@10m']:.2f} "
+            f"TextVLoc K={row['K']} R5={row['R@5m']:.2f} R10={row['R@10m']:.2f} "
             f"R20={row['R@20m']:.2f} median={row['median_best_distance_m']:.2f}"
         )
 

@@ -1,8 +1,8 @@
-# CLIP_HLOC
+# TextVLoc
 
-![CLIP_HLOC Overview](overview.png)
+![TextVLoc Overview](overview.png)
 
-CLIP_HLOC is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). This project targets the `SensorKit` setup in this repository and combines:
+TextVLoc is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). It uses Urban Street CLIP, a LoRA-adapted CLIP retriever for urban street-view text-image matching, as the coarse retrieval module. This project targets the `SensorKit` setup in this repository and combines:
 
 - VLM caption generation for query images
 - CLIP-style text-image retrieval
@@ -16,7 +16,7 @@ The codebase is currently organized around the `SensorKit` dataset layout alread
 
 - Text-only localization from retrieved database poses
 - Retrieval with pretrained CLIP / SigLIP / MetaCLIP / LongCLIP backbones
-- LoRA-based fine-tuning in `train_localclip.py`
+- Urban Street CLIP LoRA fine-tuning in `train_localclip.py`
 - Region-aware reranking with `--enable_region_rerank`
 - Geometric localization using SuperPoint + LightGlue + `pycolmap`
 - Recall evaluation with `--positive_pairs_csv`
@@ -33,7 +33,7 @@ The current default inference setup uses:
 - actual VLM: `Qwen/Qwen3-VL-8B-Instruct`
 - generated file pattern: `qwen3_query_prompts_qwen-vl_77clip10.csv`
 
-Each query image is described with a fixed navigation-oriented prompt in [hloc/generate_captions.py](/home/wxx/CLIP_HLOC/hloc/generate_captions.py:23). The generated text is intended to be:
+Each query image is described with a fixed navigation-oriented prompt in [hloc/generate_captions.py](hloc/generate_captions.py). The generated text is intended to be:
 
 - first-person viewpoint
 - focused on static landmarks and road structure
@@ -44,7 +44,7 @@ This design is meant to fit CLIP-style text retrieval better than generic image 
 
 ### Training-time text
 
-The current training script [scripts/run_clip_training_experiments.sh](/home/wxx/CLIP_HLOC/scripts/run_clip_training_experiments.sh:1) launches `train_localclip.py` with:
+The current training script [scripts/run_clip_training_experiments.sh](scripts/run_clip_training_experiments.sh) launches `train_localclip.py` with:
 
 - `TRAIN_CSV=datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/00_train_qwen3.csv`
 - `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
@@ -56,7 +56,7 @@ The training script now uses only the main CSV `description` field for LoRA fine
 
 ```text
 .
-├── hloc/                                  # HLOC code and CLIP_HLOC pipeline
+├── hloc/                                  # HLOC code and TextVLoc pipeline
 ├── scripts/                               # training / evaluation helper scripts
 ├── train_localclip.py                     # LoRA fine-tuning entrypoint
 ├── requirements-clip-hloc.txt            # Python dependencies
@@ -105,11 +105,11 @@ Notes:
 ### Option 2: Docker
 
 ```bash
-docker build -t clip_hloc .
+docker build -t textvloc .
 docker run --gpus all -it --rm \
   -v $(pwd):/app \
   -v /path/to/your/datasets:/app/datasets \
-  clip_hloc
+  textvloc
 ```
 
 ## Training
@@ -120,7 +120,7 @@ The main training entrypoint is:
 bash scripts/run_clip_training_experiments.sh
 ```
 
-That script currently launches `train_localclip.py` with:
+That script currently launches `train_localclip.py` to train Urban Street CLIP with:
 
 - text-only LoRA adaptation (`--lora-target text`)
 - main CSV descriptions as the only training text source
@@ -129,6 +129,9 @@ That script currently launches `train_localclip.py` with:
 You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
 
 ## Inference and Evaluation
+
+The current command-line entrypoint still uses the legacy Python module path
+`hloc.pipelines.RobotCar.clip_hloc` for compatibility.
 
 ### 1. Text-only localization
 
