@@ -80,6 +80,27 @@ datasets/SensorKit/
 └── clipdata/                              # CLIP fine-tuning data and checkpoints
 ```
 
+UrbanV2X image and metadata packages are available from the GitHub Release:
+
+```bash
+wget https://github.com/xxw77777kk/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_images.tar.gz
+wget https://github.com/xxw77777kk/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_metadata.tar.gz
+tar -xzf textvloc_urbanv2x_images.tar.gz
+tar -xzf textvloc_urbanv2x_metadata.tar.gz
+```
+
+The image package restores:
+
+- `datasets/SensorKit/allcams/`
+- `datasets/SensorKit/query/cam1_all/0_undistorted/`
+
+The metadata package restores:
+
+- `datasets/SensorKit/0620_gt/enu_all_mapping_gt.csv`
+- `datasets/SensorKit/0620_gt/enu_all_query_gt.csv`
+- `datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv`
+- `datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt`
+
 The default pipeline also expects an existing reference SfM model under:
 
 ```text
