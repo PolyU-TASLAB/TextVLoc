@@ -1,0 +1,25 @@
+{
+  "condition": "Six-camera Qwen description excluding reference camera cam1",
+  "caption_count": 493,
+  "paired_cam6_queries": 491,
+  "database": 493,
+  "cameras": [
+    "cam0",
+    "cam2",
+    "cam3",
+    "cam4",
+    "cam5",
+    "cam6"
+  ],
+  "view_counts": {
+    "2": 1,
+    "4": 1,
+    "6": 491
+  },
+  "checkpoint": "datasets/SensorKit/clipdata/finetune_output/text_depth_ablation_v1/text8_visual12/lora_epoch_22.pt",
+  "checkpoint_sha256": "eb8bd538b208bf7baf2a3324b44c61d76fb9d18f83ff6ee3ef8c13ba2487f524",
+  "caption_manifest_sha256": "0e33407bfacb756fa39a32489116b4af422cff5d38b9e742c7b4e3aec603ffd8",
+  "caption_csv_sha256": "0df7aa50ba5e8ca540f19cedd9dec05e05ccd394dd6a3b466fa3cf1bc362e4af",
+  "reference_features": "outputs/text_depth_ablation_v1/three_datasets_text8_visual12/UrbanV2X_features.npz",
+  "notes": "Cam0 anchors are query-side timestamps. No cam1 image is used to generate text. Two anchors lack all six views. All cameras and references still come from the same capture session."
+}

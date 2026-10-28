@@ -1,5 +1,5 @@
 #!/bin/bash
-# train_localclip：文本 LoRA + 主 CSV 描述。chmod +x run_clip_training_experiments.sh && ./run_clip_training_experiments.sh
+# Paper main model: text-last-8 / visual-last-12 LoRA, global CLIP loss only.
 
 set -e
 
@@ -9,24 +9,32 @@ TRAIN_IMG_ROOT="datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/"
 VAL_IMG_ROOT="datasets/SensorKit/clipdata/astri_412_down03/"
 BASE_OUT_DIR="datasets/SensorKit/clipdata/finetune_output"
 
-EPOCHS=50
+EPOCHS=22
 BATCH_SIZE=32
 LEARNING_RATE=1e-4
 NUM_WORKERS=12
 
-echo "train_localclip: text LoRA + main CSV descriptions"
+OUT_DIR="$BASE_OUT_DIR/text_depth_ablation_v1/text8_visual12"
+echo "train_localclip: dual LoRA (text 8, visual 12), main CSV descriptions"
 python3 train_localclip.py \
     --train-csv "$TRAIN_CSV" \
     --val-csv "$VAL_CSV" \
     --train-image-root-dir "$TRAIN_IMG_ROOT" \
     --val-image-root-dir "$VAL_IMG_ROOT" \
-    --out-dir "$BASE_OUT_DIR/qwen3_clipdata_text_sparse03_remove/" \
+    --out-dir "$OUT_DIR" \
     --pretrained "datacomp_xl_s13b_b90k" \
     --epochs "$EPOCHS" \
     --batch-size "$BATCH_SIZE" \
     --lr "$LEARNING_RATE" \
     --num-workers "$NUM_WORKERS" \
     --use-amp \
-    --lora-target text
+    --lora-target all \
+    --lora-last-n 12 \
+    --lora-text-last-n 8 \
+    --lora-visual-last-n 12 \
+    --lora-r 8 \
+    --lora-alpha 16 \
+    --seed 42 \
+    --skip-hf-baseline
 
-echo "Done. Outputs under $BASE_OUT_DIR/qwen3_clipdata_text_sparse03_remove/"
+echo "Done. Main checkpoint: $OUT_DIR/lora_epoch_22.pt"

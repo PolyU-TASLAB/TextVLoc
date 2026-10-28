@@ -1,0 +1,11 @@
+{
+  "groups": 866,
+  "database": 833,
+  "maximum_timestamp_delta_us": {
+    "mono_left": 44641,
+    "mono_right": 44641,
+    "mono_rear": 90091
+  },
+  "query_rear_frames_identical_to_database_frame": 0,
+  "note": "The rear observation is drawn from the same traversal, with exact database rear frames excluded."
+}

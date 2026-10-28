@@ -1,0 +1,11 @@
+{
+  "source": "RobotCar stereo_centre, mono_left, mono_right, mono_rear; same-traversal reference direction included without exact database frames",
+  "queries": 866,
+  "database": 833,
+  "checkpoint": "datasets/SensorKit/clipdata/finetune_output/text_depth_ablation_v1/text8_visual12/lora_epoch_22.pt",
+  "checkpoint_sha256": "eb8bd538b208bf7baf2a3324b44c61d76fb9d18f83ff6ee3ef8c13ba2487f524",
+  "caption_csv_sha256": "9d846901e107726459f2cb0cf4ccd4b567a9f3d32ce4dd7375b633c272d309b3",
+  "caption_manifest_sha256": "0b494eef1bf7574a763ffe3410504c6feeea0b62f8cc96804d4734cc94cbeb21",
+  "caption_model_load_in_4bit": false,
+  "notes": "All cameras and the rear observation come from the same traversal; exact database rear frames are excluded, but adjacent rear frames are visually and geographically close. This is a privileged complete-surroundings condition."
+}

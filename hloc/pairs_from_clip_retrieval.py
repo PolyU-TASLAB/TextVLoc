@@ -1538,45 +1538,14 @@ def calculate_recall_at_k(query_names, db_names, top_k_indices, k_values, positi
 
 def load_finetuned_model(ckpt_path: Path, device: str):
     """从检查点加载微调后的模型"""
-    import sys
-    from pathlib import Path
-    
-    train_script_dir = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(train_script_dir))
-    from train_localclip import (
-        get_model_dimensions,
-        inject_lora_openclip,
-        TextGuidedVisualAttention
-    )
+    from train_localclip import get_model_dimensions, TextGuidedVisualAttention
+    from hloc.clip_lora_checkpoint import load_openclip_lora_checkpoint
     
     logger.info(f"📦 Loading model from checkpoint: {ckpt_path}")
-    ckpt = torch.load(ckpt_path, map_location='cpu')
-    
-    model_name = ckpt.get('model_name', 'ViT-L-14')
-    pretrained = ckpt.get('pretrained', 'datacomp_xl_s13b_b90k')
-    
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        model_name, pretrained=pretrained, device='cpu'
-    )
-    tokenizer = open_clip.get_tokenizer(model_name)
-    
+    model, tokenizer, preprocess, ckpt = load_openclip_lora_checkpoint(ckpt_path, device)
     vision_dim, text_dim = get_model_dimensions(model)
     logger.info(f"🔍 Detected dimensions: vision={vision_dim}, text={text_dim}")
-    
-    model = inject_lora_openclip(
-        model,
-        target=ckpt.get('lora_target', 'all'),
-        last_n_blocks=ckpt.get('lora_last_n', 12),
-        r=ckpt.get('lora_r', 8),
-        alpha=ckpt.get('lora_alpha', 16),
-        dropout=ckpt.get('lora_dropout', 0.0)
-    )
-    
-    if 'lora_state' in ckpt:
-        model.load_state_dict(ckpt['lora_state'], strict=False)
-        logger.info("✅ LoRA weights loaded successfully")
-    
-    model.to(device).eval()
+    logger.info("✅ LoRA weights loaded and validated")
     
     cross_attn_module = None
     if 'cross_attn_state' in ckpt:

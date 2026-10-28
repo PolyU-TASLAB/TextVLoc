@@ -50,7 +50,7 @@ The current training script [scripts/run_clip_training_experiments.sh](scripts/r
 - `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
 - `--out-dir datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/`
 
-The training script now uses only the main CSV `description` field for LoRA fine-tuning, while the online localization pipeline currently uses the short `77`-word navigation descriptions for retrieval.
+The paper checkpoint adapts the final 8 text blocks and final 12 visual blocks with LoRA (rank 8, alpha 16). It trains on the CSV `description` field for 22 epochs with seed 42. Online query captions use the 77-token navigation prompt. The paper checkpoint is `checkpoints/text8_visual12_epoch22.pt` (SHA-256 `eb8bd538b208bf7baf2a3324b44c61d76fb9d18f83ff6ee3ef8c13ba2487f524`).
 
 ## Repository Layout
 
@@ -99,7 +99,7 @@ The metadata package restores:
 - `datasets/SensorKit/0620_gt/enu_all_mapping_gt.csv`
 - `datasets/SensorKit/0620_gt/enu_all_query_gt.csv`
 - `datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv`
-- `datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt`
+- `datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt` (older text-only baseline; the paper checkpoint is in `checkpoints/`)
 
 The default pipeline also expects an existing reference SfM model under:
 
@@ -158,11 +158,16 @@ bash scripts/run_clip_training_experiments.sh
 
 That script currently launches `train_localclip.py` to train Urban Street CLIP with:
 
-- text-only LoRA adaptation (`--lora-target text`)
-- main CSV descriptions as the only training text source
-- cross-attention enabled
+- dual-tower LoRA: `--lora-target all --lora-text-last-n 8 --lora-visual-last-n 12`
+- main CSV descriptions as the training text source
+- no cross-attention module in this training command
 
 You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
+
+
+### Paper positive-pair protocol
+
+UrbanV2X positives are selected by NetVLAD similarity at least 0.5, then filtered to ENU 3D distance at most 20 m. The released [positive-pair CSV](protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv) contains 3,512 pairs. The distance audit is in `scripts/opposite_view/audit_urban_positive_pair_distances.py`. SYNTHIA and RobotCar retrieval recall use their pose-based distance thresholds. The positive-pair CSV is for evaluation and does not itself constrain model retrieval rankings.
 
 ## Inference and Evaluation
 
@@ -181,8 +186,8 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --num_loc 20 \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
-  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
-  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
+  --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
+  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv \
   --text_only_loc
 ```
 
@@ -198,8 +203,8 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --num_loc 20 \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
-  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
-  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
+  --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
+  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv \
   --text_only_loc \
   --enable_region_rerank \
   --region_grid 3 \
@@ -238,17 +243,17 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --num_loc 20 \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
-  --lora_ckpt_path datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/lora_epoch_22.pt \
-  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv
+  --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
+  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv
 ```
 
 If you want both reranking and geometric localization, keep `--enable_region_rerank` and omit `--text_only_loc`.
 
 ### 4. UrbanV2X opposite-view retrieval evaluation
 
-The UrbanV2X opposite-view protocol compares image-based retrieval methods such as NetVLAD, MegaLoc, CosPlace, and EigenPlaces with TextVLoc under viewpoint reversal.
+The archived UrbanV2X opposite-view protocol compares image retrieval baselines with TextVLoc under viewpoint reversal. The complete-surroundings experiments used for the paper are documented in [repro/opposite_view/README.md](repro/opposite_view/README.md).
 
-UrbanV2X uses `cam6` as the query stream and `cam1` as the reference/text-source stream. The provided UrbanV2X text mapping is:
+The archived protocol uses `cam6` as the query stream and `cam1` as the reference/text-source stream. Its text mapping is:
 
 ```text
 outputs/SensorKit_hloc/cam6_to_cam1_opposite_view/seq5_stride1/cam6_query_to_cam1_front_text_qwen-vl.csv
@@ -274,10 +279,10 @@ python3 scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py \
 
 ## Reproducibility Notes
 
-- This repository does not track `datasets/`, `outputs/`, checkpoints, or generated features by default.
+- Raw `datasets/` and `outputs/` are not tracked. The main LoRA adapter and compact opposite-view evaluation artifacts are versioned under `checkpoints/` and `repro/`.
 - The current pipeline is tightly coupled to the `SensorKit` directory structure and several hard-coded paths.
 - If you plan to publish the project publicly, document how others can obtain `SensorKit` data or provide a script that rebuilds the required folder layout.
-- If you need to version checkpoints or sample outputs, use Git LFS instead of normal Git.
+- The 10.7 MB LoRA checkpoint is tracked directly in Git; full backbone weights are downloaded by OpenCLIP.
 
 ## Acknowledgements
 

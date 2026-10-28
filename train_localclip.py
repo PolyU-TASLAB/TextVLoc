@@ -111,8 +111,18 @@ class LoRAInjectedQKVAttention(nn.Module):
         return self.original_attn.out_proj(attn_output), None
 
 
-def inject_lora_openclip(model, target='all', last_n_blocks=12, r=8, alpha=16, dropout=0.0):
+def inject_lora_openclip(model, target='all', last_n_blocks=12, r=8, alpha=16, dropout=0.0,
+                        text_last_n_blocks=None, visual_last_n_blocks=None):
     """在视觉/文本 tower 最后若干 block 注入 QKV+MLP LoRA。"""
+    text_n = last_n_blocks if text_last_n_blocks is None else text_last_n_blocks
+    visual_n = last_n_blocks if visual_last_n_blocks is None else visual_last_n_blocks
+    text_blocks = model.transformer.resblocks if hasattr(model, 'transformer') else model.text.transformer.resblocks
+    is_eva = hasattr(model.visual, 'trunk') and hasattr(model.visual.trunk, 'blocks')
+    visual_blocks = model.visual.trunk.blocks if is_eva else model.visual.transformer.resblocks
+    if target in ('all', 'text') and not 1 <= text_n <= len(text_blocks):
+        raise ValueError(f"Invalid text LoRA depth: {text_n}")
+    if target in ('all', 'vision') and not 1 <= visual_n <= len(visual_blocks):
+        raise ValueError(f"Invalid visual LoRA depth: {visual_n}")
     def _inject_block(blk):
         blk.attn = LoRAInjectedQKVAttention(blk.attn, r, alpha, dropout)
         blk.attn.original_attn.out_proj = _replace_linear_with_lora_linear(
@@ -123,12 +133,20 @@ def inject_lora_openclip(model, target='all', last_n_blocks=12, r=8, alpha=16, d
 
     if target == 'all' or target == 'vision':
         print("Injecting LoRA into Vision Transformer (QKV, out_proj & MLP)...")
-        for blk in model.visual.transformer.resblocks[-last_n_blocks:]:
-            _inject_block(blk)
+        for blk in visual_blocks[-visual_n:]:
+            if is_eva:
+                for attr in ('q_proj', 'k_proj', 'v_proj', 'proj'):
+                    setattr(blk.attn, attr, _replace_linear_with_lora_linear(
+                        getattr(blk.attn, attr), r, alpha, dropout))
+                for attr in ('fc1_g', 'fc1_x', 'fc2'):
+                    setattr(blk.mlp, attr, _replace_linear_with_lora_linear(
+                        getattr(blk.mlp, attr), r, alpha, dropout))
+            else:
+                _inject_block(blk)
     
     if target == 'all' or target == 'text':
         print("Injecting LoRA into Text Transformer (QKV, out_proj & MLP)...")
-        for blk in model.transformer.resblocks[-last_n_blocks:]:
+        for blk in text_blocks[-text_n:]:
             _inject_block(blk)
     
     lora.mark_only_lora_as_trainable(model, bias='lora_only')
@@ -252,7 +270,8 @@ def get_model_dimensions(model):
         dummy_text = torch.zeros(1, 77, dtype=torch.long).to(next(model.parameters()).device)
         with torch.no_grad():
             if vision_dim is None:
-                vision_dim = model.visual.conv1(dummy_img).shape[1]
+                vision_dim = (model.visual.conv1(dummy_img).shape[1]
+                              if hasattr(model.visual, 'conv1') else model.encode_image(dummy_img).shape[-1])
             if text_dim is None:
                 text_dim = model.encode_text(dummy_text).shape[-1]
 
@@ -385,6 +404,8 @@ def main():
     ap.add_argument('--model-name', type=str, default='ViT-L-14')
     ap.add_argument('--pretrained', type=str, default='datacomp_xl_s13b_b90k')
     ap.add_argument('--hf-model-id', type=str, default='laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K', help="用于基线比较的 Hugging Face 模型 ID。")
+    ap.add_argument('--skip-hf-baseline', action='store_true',
+                    help='Skip the unrelated Hugging Face baseline during multi-backbone LoRA training.')
     ap.add_argument('--epochs', type=int, default=5)
     ap.add_argument('--batch-size', type=int, default=64)
     ap.add_argument('--lr', type=float, default=1e-4)
@@ -393,6 +414,10 @@ def main():
     ap.add_argument('--use-amp', action='store_true')
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--lora-last-n', type=int, default=12)
+    ap.add_argument('--lora-text-last-n', type=int, default=None,
+                    help='Override LoRA depth for the text tower only.')
+    ap.add_argument('--lora-visual-last-n', type=int, default=None,
+                    help='Override LoRA depth for the visual tower only.')
     ap.add_argument('--lora-r', type=int, default=8)
     ap.add_argument('--lora-alpha', type=int, default=16)
     ap.add_argument('--lora-dropout', type=float, default=0.0)
@@ -427,11 +452,12 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    val_ds_for_hf = CsvDataset(csv_path=args.val_csv, preprocess=None, image_root_dir=args.val_image_root_dir, for_hf=True)
-    hf_metrics = evaluate_hf_baseline(args.hf_model_id, val_ds_for_hf, device, args)
-    if hf_metrics:
-        msg = " | ".join([f"{k}={v*100:.2f}%" for k,v in hf_metrics.items()])
-        print(f"-> [Hugging Face Baseline] {msg}\n")
+    if not args.skip_hf_baseline:
+        val_ds_for_hf = CsvDataset(csv_path=args.val_csv, preprocess=None, image_root_dir=args.val_image_root_dir, for_hf=True)
+        hf_metrics = evaluate_hf_baseline(args.hf_model_id, val_ds_for_hf, device, args)
+        if hf_metrics:
+            msg = " | ".join([f"{k}={v*100:.2f}%" for k,v in hf_metrics.items()])
+            print(f"-> [Hugging Face Baseline] {msg}\n")
 
     print("Loading open_clip model and preprocessor...")
 
@@ -455,7 +481,9 @@ def main():
     logger.info("Injecting LoRA layers...")
     model = inject_lora_openclip(
         model, target=args.lora_target, last_n_blocks=args.lora_last_n,
-        r=args.lora_r, alpha=args.lora_alpha, dropout=args.lora_dropout
+        r=args.lora_r, alpha=args.lora_alpha, dropout=args.lora_dropout,
+        text_last_n_blocks=args.lora_text_last_n,
+        visual_last_n_blocks=args.lora_visual_last_n,
     )
     model.to(device)
     
@@ -492,13 +520,16 @@ def main():
     
     if lora_checkpoint_path:
         print(f"Loading LoRA weights from {lora_checkpoint_path}...")
-        checkpoint = torch.load(lora_checkpoint_path, map_location=device)
-        if 'lora_state' in checkpoint:
-            model.load_state_dict(checkpoint['lora_state'], strict=False)
-            print("Successfully loaded LoRA state.")
-        else:
-            model.load_state_dict(checkpoint, strict=False)
-            print("Successfully loaded legacy LoRA checkpoint.")
+        from hloc.clip_lora_checkpoint import _target_from_state, load_lora_state_into_model
+        checkpoint = torch.load(lora_checkpoint_path, map_location="cpu", weights_only=True)
+        if not isinstance(checkpoint, dict) or 'lora_state' not in checkpoint:
+            raise ValueError(f"Expected a train_localclip LoRA checkpoint: {lora_checkpoint_path}")
+        state = checkpoint['lora_state']
+        target = checkpoint.get('lora_target', _target_from_state(state))
+        if target != _target_from_state(state) or target != args.lora_target:
+            raise ValueError(f"Checkpoint LoRA target {target} differs from requested {args.lora_target}")
+        load_lora_state_into_model(model, state)
+        print("Successfully loaded and validated LoRA state.")
 
     print("Loading datasets for open_clip training...")
     train_ds = CsvDataset(
@@ -648,10 +679,18 @@ def main():
             'mode': 'lora',
             'model_name': args.model_name,
             'pretrained': base_pretrained_name,
+            # Record the injected tower(s).  Older text-only checkpoints did
+            # not contain this field, which made vision/all ablations
+            # ambiguous when they were loaded for downstream evaluation.
+            'lora_target': args.lora_target,
             'lora_last_n': args.lora_last_n,
+            'lora_text_last_n': args.lora_last_n if args.lora_text_last_n is None else args.lora_text_last_n,
+            'lora_visual_last_n': args.lora_last_n if args.lora_visual_last_n is None else args.lora_visual_last_n,
             'lora_r': args.lora_r,
             'lora_alpha': args.lora_alpha,
             'lora_dropout': args.lora_dropout,
+            'seed': args.seed,
+            'epoch': epoch,
             'lora_state': lora_state,
         }
         

@@ -230,70 +230,15 @@ def load_model_and_processor(model_id: str = None, lora_ckpt_path: Path = None, 
     # ============================================================
     # 情况 1: 使用 LoRA 微调模型（仅支持 OpenCLIP）
     # ============================================================
-    if lora_ckpt_path and lora_ckpt_path.exists():
-        logger.info(f"🔧 Loading LoRA fine-tuned model from {lora_ckpt_path}")
-        
-        try:
-            import open_clip
-            import loralib as lora
-            
-            # 加载检查点
-            ckpt = torch.load(lora_ckpt_path, map_location='cpu')
-            
-            # 提取元数据
-            model_name = ckpt.get('model_name', 'ViT-L-14')
-            pretrained_name = ckpt.get('pretrained', 'datacomp_xl_s13b_b90k')
-            
-            logger.info(f"   Base model: {model_name}")
-            logger.info(f"   Pretrained: {pretrained_name}")
-            
-            # 创建基础模型
-            model, _, preprocess = open_clip.create_model_and_transforms(
-                model_name,
-                pretrained=pretrained_name,
-                device='cpu'
-            )
-            
-            # 注入 LoRA
-            lora_config = ckpt.get('lora_config', {})
-            target = lora_config.get('target', 'text')
-            r = lora_config.get('r', 16)
-            alpha = lora_config.get('alpha', 16)
-            dropout = lora_config.get('dropout', 0.1)
-            last_n_blocks = lora_config.get('last_n_blocks', 12)
-            
-            logger.info(f"   LoRA config: target={target}, r={r}, alpha={alpha}")
-            
-            model = inject_lora_openclip(
-                model, 
-                target=target, 
-                last_n_blocks=last_n_blocks,
-                r=r, 
-                alpha=alpha, 
-                dropout=dropout
-            )
-            
-            # 加载权重
-            state_dict = ckpt.get('model_state_dict', ckpt.get('state_dict', ckpt))
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            
-            if missing:
-                logger.warning(f"   Missing keys: {len(missing)}")
-            if unexpected:
-                logger.warning(f"   Unexpected keys: {len(unexpected)}")
-            
-            model = model.to(device)
-            model.eval()
-            
-            tokenizer = open_clip.get_tokenizer(model_name)
-            
-            logger.info("✅ LoRA model loaded successfully!")
-            return model, tokenizer, preprocess
-        
-        except Exception as e:
-            logger.error(f"❌ Failed to load LoRA model: {e}")
-            logger.warning("⚠️ Falling back to baseline model...")
-            lora_ckpt_path = None
+    if lora_ckpt_path:
+        from hloc.clip_lora_checkpoint import load_openclip_lora_checkpoint
+
+        lora_ckpt_path = Path(lora_ckpt_path)
+        if not lora_ckpt_path.is_file():
+            raise FileNotFoundError(lora_ckpt_path)
+        logger.info(f"Loading validated LoRA model from {lora_ckpt_path}")
+        model, tokenizer, preprocess, _ = load_openclip_lora_checkpoint(lora_ckpt_path, device)
+        return model, tokenizer, preprocess
     
     # ============================================================
     # 情况 2: 使用预训练基线模型

@@ -1,5 +1,6 @@
 import argparse
 import csv
+import hashlib
 import logging
 import re
 import time
@@ -1379,7 +1380,7 @@ def rerank_with_trained_reranker(
 # ============================================================
 # ✅ 修改: 根据模型 ID 动态生成特征文件路径
 # ============================================================
-def get_clip_features_path(outputs_dir, model_id):
+def get_clip_features_path(outputs_dir, model_id, checkpoint_path=None):
     """
     根据模型 ID 生成唯一的 CLIP 特征文件路径。
     
@@ -1394,7 +1395,18 @@ def get_clip_features_path(outputs_dir, model_id):
     safe_model_name = model_id.replace("/", "_").replace("-", "_")
     
     # 生成文件名
-    features_filename = f"clip_features_{safe_model_name}.h5"
+    if checkpoint_path is None:
+        features_filename = f"clip_features_{safe_model_name}.h5"
+    else:
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(checkpoint_path)
+        digest = hashlib.sha256()
+        with checkpoint_path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        features_filename = (f"clip_features_{safe_model_name}_"
+                             f"{checkpoint_path.stem}_{digest.hexdigest()[:12]}.h5")
     
     return outputs_dir / features_filename
 
@@ -1563,7 +1575,7 @@ def run(args):
 # )
 
 
-    clip_features_path = get_clip_features_path(outputs, args.clip_model_id)
+    clip_features_path = get_clip_features_path(outputs, args.clip_model_id, args.lora_ckpt_path)
     logger.info(f"📂 Using CLIP features file: {clip_features_path}")
     
     # ============================================================
