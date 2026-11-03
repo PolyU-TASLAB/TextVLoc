@@ -39,6 +39,14 @@ class SuperPoint(BaseModel):
     def _init(self, conf):
         if conf["fix_sampling"]:
             superpoint.sample_descriptors = sample_descriptors_fix_sampling
+        weights = Path(superpoint.__file__).parent / "weights/superpoint_v1.pth"
+        if not weights.is_file():
+            weights.parent.mkdir(parents=True, exist_ok=True)
+            torch.hub.download_url_to_file(
+                "https://raw.githubusercontent.com/magicleap/SuperGluePretrainedNetwork/"
+                "master/models/weights/superpoint_v1.pth", weights,
+                hash_prefix="52b6708629640ca883673b5d5c097c4ddad37d8048b33f09c8ca0d69db12c40e",
+            )
         self.net = superpoint.SuperPoint(conf)
 
     def _forward(self, data):

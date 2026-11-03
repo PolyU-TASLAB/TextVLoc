@@ -9,7 +9,7 @@ TRAIN_IMG_ROOT="datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/"
 VAL_IMG_ROOT="datasets/SensorKit/clipdata/astri_412_down03/"
 BASE_OUT_DIR="datasets/SensorKit/clipdata/finetune_output"
 
-EPOCHS=22
+EPOCHS=${EPOCHS:-40}
 BATCH_SIZE=32
 LEARNING_RATE=1e-4
 NUM_WORKERS=12

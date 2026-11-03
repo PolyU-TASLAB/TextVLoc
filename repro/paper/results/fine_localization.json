@@ -1,0 +1,26 @@
+{
+  "queries": 493,
+  "poses_returned": 493,
+  "pose_return_rate_pct": 100.0,
+  "ape_lt_5m_pct": 95.94320486815415,
+  "ape_lt_10m_pct": 95.94320486815415,
+  "all_returned_ape": {
+    "count": 493,
+    "mean_m": 8.428174209956092,
+    "rmse_m": 44.61139167967824,
+    "median_m": 0.9736755750942598,
+    "p90_m": 2.379254268905833,
+    "p95_m": 3.434445694988616
+  },
+  "correct_lt_10m_ape": {
+    "count": 473,
+    "mean_m": 1.0678404163615305,
+    "rmse_m": 1.297415331626017,
+    "median_m": 0.91357317009322,
+    "p90_m": 2.0312880822245165,
+    "p95_m": 2.4717087453412945
+  },
+  "checkpoint": "datasets/SensorKit/clipdata/finetune_output/text_depth_ablation_v1/text8_visual12/lora_epoch_22.pt",
+  "retrieval": "outputs/text_depth_ablation_v1/query_variants_text8/original_qwen__pairs.txt",
+  "protocol": "493 cam1 queries; global Top20; same SuperPoint-LightGlue/SfM PnP; missing poses count as failures; success APE<10m"
+}

@@ -31,6 +31,7 @@ QWEN_VL_NAV_PROMPT = textwrap.dedent(
     Focus on:
     - Unique or permanent landmarks (e.g., logos, building, Pavement & Road Markings, Intersection Geometry)
     - Traffic Signs and Signals
+
     - Road structure or intersections
     - Vegetation & Street Furniture
     - Building materials or signs that help visual recognition
@@ -52,10 +53,11 @@ Focus on:
 - Building materials or signs that help visual recognition
 
 Keep the description concise and natural. Avoid speculation or subjective opinions.
+**IMPORTANT: The entire description must be a single, complete sentence and strictly under 77 words.**
 ASSISTANT:"""
 
 
-def get_captioner(model_name: str, device: str):
+def get_captioner(model_name: str, device: str, *, revision=None, load_in_4bit=True):
     """按模型名加载一次模型，返回 caption(image_path) -> str。"""
     logger.info(f"Loading model '{model_name}' onto device '{device}'...")
 
@@ -81,30 +83,35 @@ def get_captioner(model_name: str, device: str):
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.float16,
         )
-        processor = LlavaNextProcessor.from_pretrained(LLAVA_MODEL_ID)
+        processor = LlavaNextProcessor.from_pretrained(LLAVA_MODEL_ID, revision=revision)
         model = LlavaNextForConditionalGeneration.from_pretrained(
             LLAVA_MODEL_ID,
-            quantization_config=bnb_config,
-            device_map="auto",
+            revision=revision,
+            **({"quantization_config": bnb_config} if load_in_4bit else {}),
+            device_map=device,
             torch_dtype=torch.float16,
-        )
+        ).eval()
 
-        def caption(image_path: Path) -> str:
-            image = Image.open(image_path).convert("RGB")
+        def caption(image_path: Path, *, prompt: str = QWEN_VL_NAV_PROMPT,
+                    max_new_tokens: int = 96) -> str:
+            with Image.open(image_path) as source:
+                image = source.convert("RGB")
+            messages = [{"role": "user", "content": [
+                {"type": "image"}, {"type": "text", "text": prompt}]}]
+            text = processor.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False)
             inputs = processor(
-                text=LLAVA_PROMPT_TEMPLATE,
+                text=text,
                 images=image,
                 return_tensors="pt",
-            ).to(model.device)
+            ).to(model.device, torch.float16)
             eos_token_id = processor.tokenizer.eos_token_id
-            out = model.generate(
-                **inputs,
-                max_new_tokens=250,
-                do_sample=False,
-                eos_token_id=eos_token_id,
-            )
-            full_text = processor.decode(out[0], skip_special_tokens=True)
-            return full_text.split("ASSISTANT:")[-1].strip()
+            with torch.inference_mode():
+                out = model.generate(
+                    **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+                    eos_token_id=eos_token_id, pad_token_id=eos_token_id)
+            new_ids = out[0, inputs["input_ids"].shape[-1]:]
+            return processor.decode(new_ids, skip_special_tokens=True).strip()
 
         return caption
 
@@ -123,14 +130,14 @@ def get_captioner(model_name: str, device: str):
             tok = processor.tokenizer
             eos_id = tok.eos_token_id
 
-            def caption(image_path: Path) -> str:
+            def caption(image_path: Path, *, prompt: str = QWEN_VL_NAV_PROMPT) -> str:
                 image = Image.open(image_path).convert("RGB")
                 messages = [
                     {
                         "role": "user",
                         "content": [
                             {"type": "image"},
-                            {"type": "text", "text": QWEN_VL_NAV_PROMPT},
+                            {"type": "text", "text": prompt},
                         ],
                     }
                 ]

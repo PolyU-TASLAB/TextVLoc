@@ -1,0 +1,18 @@
+{
+  "natural_static": {
+    "category": "expression_and_possible_content_change",
+    "prompt": "Describe the visible street scene in plain, natural English to someone trying to recognize this place. Focus on permanent buildings, road and intersection structure, fixed signs, vegetation, and street furniture. Omit people, vehicles, weather, and subjective impressions. Mention spatial relationships only when clearly visible from this camera viewpoint. Do not infer anything behind the camera or invent text on signs. Use one or two natural sentences, approximately 35-55 words. Return only the description."
+  },
+  "third_person_static": {
+    "category": "expression_and_possible_content_change",
+    "prompt": "Describe the visible street scene in neutral third-person English, without using I, we, or you. Focus on permanent buildings, road and intersection structure, fixed signs, vegetation, and street furniture. Omit people, vehicles, weather, and subjective impressions. Mention spatial relationships only when clearly visible from this camera viewpoint. Do not infer anything behind the camera or invent text on signs. Use one or two natural sentences, approximately 35-55 words. Return only the description."
+  },
+  "brief_static": {
+    "category": "information_compression",
+    "prompt": "Describe this visible location in one short, natural English sentence of approximately 15-25 words. Select two or three clearly visible permanent landmarks or road-structure cues useful for recognizing the place. Omit people, vehicles, weather, and subjective impressions. Do not invent landmarks, sign text, or anything outside this camera view. Return only the description."
+  },
+  "noun_phrases": {
+    "category": "information_compression",
+    "prompt": "List three to five short English noun phrases naming the most recognizable permanent elements visible in this street image, such as buildings, intersection types, road markings, fixed signs, or street furniture. Include distinctive visible attributes when clear. Separate the phrases with commas; do not write a full sentence. Use approximately 10-25 words in total. Omit people, vehicles, weather, and subjective impressions. Do not invent landmarks, sign text, or anything outside this camera view. Return only the phrases."
+  }
+}

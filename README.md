@@ -48,9 +48,9 @@ The current training script [scripts/run_clip_training_experiments.sh](scripts/r
 
 - `TRAIN_CSV=datasets/SensorKit/clipdata/clipdata_prepare_sparse03_remove/00_train_qwen3.csv`
 - `VAL_CSV=datasets/SensorKit/clipdata/astri_412_down03/val_qwen3.csv`
-- `--out-dir datasets/SensorKit/clipdata/finetune_output/qwen3_clipdata_text_sparse03_remove/`
+- `--out-dir datasets/SensorKit/clipdata/finetune_output/text_depth_ablation_v1/text8_visual12/`
 
-The paper checkpoint adapts the final 8 text blocks and final 12 visual blocks with LoRA (rank 8, alpha 16). It trains on the CSV `description` field for 22 epochs with seed 42. Online query captions use the 77-token navigation prompt. The paper checkpoint is `checkpoints/text8_visual12_epoch22.pt` (SHA-256 `eb8bd538b208bf7baf2a3324b44c61d76fb9d18f83ff6ee3ef8c13ba2487f524`).
+The paper checkpoint adapts the final 8 text blocks and final 12 visual blocks with LoRA (rank 8, alpha 16). It uses the CSV `description` field and the epoch-22 checkpoint with seed 42. The navigation prompt requests a single sentence under 77 words; CLIP tokenization is limited to 77 tokens. The paper checkpoint is `checkpoints/text8_visual12_epoch22.pt` (SHA-256 `eb8bd538b208bf7baf2a3324b44c61d76fb9d18f83ff6ee3ef8c13ba2487f524`).
 
 ## Repository Layout
 
@@ -161,13 +161,22 @@ That script currently launches `train_localclip.py` to train Urban Street CLIP w
 - dual-tower LoRA: `--lora-target all --lora-text-last-n 8 --lora-visual-last-n 12`
 - main CSV descriptions as the training text source
 - no cross-attention module in this training command
+- 40 training epochs by default, with epoch 22 used for paper evaluation (`EPOCHS=22` stops at the released checkpoint)
 
 You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
 
 
-### Paper positive-pair protocol
+### Paper reproduction
 
-UrbanV2X positives are selected by NetVLAD similarity at least 0.5, then filtered to ENU 3D distance at most 20 m. The released [positive-pair CSV](protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv) contains 3,512 pairs. The distance audit is in `scripts/opposite_view/audit_urban_positive_pair_distances.py`. SYNTHIA and RobotCar retrieval recall use their pose-based distance thresholds. The positive-pair CSV is for evaluation and does not itself constrain model retrieval rankings.
+The current manuscript uses text-last-8 / visual-last-12 LoRA, epoch 22, and a 3x3 maximum-region reranker with global weight 0.75. The full reproduction guide, released query captions, rankings and timing/pose records are in [repro/paper/README.md](repro/paper/README.md). It covers the retrieval, coarse localization, query styles/generators, text perturbations, opposite-view, fine localization and runtime experiments.
+
+```bash
+python3 -m scripts.eval_paper_retrieval check
+python3 -m scripts.eval_paper_pose check
+python3 -m scripts.eval_paper_retrieval evaluate --output-dir outputs/paper_retrieval
+```
+
+`protocols/urbanv2x_paper_positive_pairs.csv` is the historical list used for the manuscript numbers. The separately released `protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv` enforces ENU 3D distance <=20m and changes some retrieval recall values. The manuscript describes a 20m criterion, but the historical list does not strictly satisfy it; see the reproduction guide for this unresolved manuscript/protocol discrepancy. Geographic localization recall is computed independently from ENU positions.
 
 ## Inference and Evaluation
 
@@ -187,7 +196,7 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv \
+  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv \
   --text_only_loc
 ```
 
@@ -204,7 +213,7 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv \
+  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv \
   --text_only_loc \
   --enable_region_rerank \
   --region_grid 3 \
@@ -214,8 +223,9 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
 Useful extra flags:
 
 - `--evaluate_rerank_recall`
-- `--region_top_m 2`
-- `--region_alpha 0.5`
+- `--region_top_m 1`
+- `--region_reduce max`
+- `--region_alpha 0.75`
 
 You can also run the helper script:
 
@@ -244,7 +254,7 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv
+  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv
 ```
 
 If you want both reranking and geometric localization, keep `--enable_region_rerank` and omit `--text_only_loc`.

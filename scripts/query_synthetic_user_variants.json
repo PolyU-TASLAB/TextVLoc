@@ -1,0 +1,6 @@
+{
+  "synthetic_casual": {
+    "category": "synthetic_human_style_not_human_written",
+    "prompt": "Look only at this photograph. Write an informal English location query as someone asking a navigation service where they are. Mention just two or three visible permanent landmarks in ordinary everyday words, without exhaustively describing the scene. Use 15 to 30 words. Do not invent facts, include people or vehicles, guess unreadable signs, or describe anything outside the photograph. Output only the query. This is a synthetic simulation, not a real human annotation."
+  }
+}

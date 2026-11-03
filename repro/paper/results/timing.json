@@ -1,0 +1,181 @@
+{
+  "device": "NVIDIA GeForce RTX 4090 D",
+  "checkpoint": "datasets/SensorKit/clipdata/finetune_output/text_depth_ablation_v1/text8_visual12/lora_epoch_22.pt",
+  "queries_total": 493,
+  "warmup_queries": 10,
+  "timed_queries_per_method": 483,
+  "rotated_method_order": true,
+  "offline": "Models, reference global descriptors, SfM map and geo-tags loaded before timing; precomputed reference local-feature HDF5 opened once.",
+  "online": "Existing text string tokenization/encoding; query JPEG decode and feature extraction; Top20 search; per-candidate HDF5 reference-feature reads; LightGlue matching; pooled 2D-3D correspondences; PyCOLMAP RANSAC pose.",
+  "excluded": "caption generation, speech recognition, model/map load, output-file writing",
+  "methods": {
+    "text_only": {
+      "global_extraction": {
+        "mean_ms": 2.2395271862742314,
+        "median_ms": 2.2146459959913045,
+        "p95_ms": 2.4876729090465233,
+        "min_ms": 2.024888002779335,
+        "max_ms": 2.877741993870586,
+        "n": 483
+      },
+      "retrieval": {
+        "mean_ms": 0.06282043492172769,
+        "median_ms": 0.06099601159803569,
+        "p95_ms": 0.0749606144381687,
+        "min_ms": 0.04962697857990861,
+        "max_ms": 0.22438899031840265,
+        "n": 483
+      },
+      "coarse": {
+        "mean_ms": 2.3023476211959593,
+        "median_ms": 2.2763049928471446,
+        "p95_ms": 2.5537289126077662,
+        "min_ms": 2.0819479832425714,
+        "max_ms": 2.946094988146797,
+        "n": 483
+      },
+      "end_to_end": {
+        "mean_ms": 2.311844580628915,
+        "median_ms": 2.285216993186623,
+        "p95_ms": 2.563688714872114,
+        "min_ms": 2.0906979916617274,
+        "max_ms": 2.956202020868659,
+        "n": 483
+      }
+    },
+    "text_image": {
+      "global_extraction": {
+        "mean_ms": 2.081806317124107,
+        "median_ms": 2.0357980101834983,
+        "p95_ms": 2.3518255999078974,
+        "min_ms": 1.8608210084494203,
+        "max_ms": 2.631579991430044,
+        "n": 483
+      },
+      "retrieval": {
+        "mean_ms": 0.0547793667086672,
+        "median_ms": 0.05118799163028598,
+        "p95_ms": 0.06831169303040951,
+        "min_ms": 0.04463200457394123,
+        "max_ms": 0.20928500453010201,
+        "n": 483
+      },
+      "coarse": {
+        "mean_ms": 2.136585683832774,
+        "median_ms": 2.0861420198343694,
+        "p95_ms": 2.418634682544507,
+        "min_ms": 1.9079500052612275,
+        "max_ms": 2.7025050076190382,
+        "n": 483
+      },
+      "local_extraction": {
+        "mean_ms": 12.644284394329633,
+        "median_ms": 12.675342004513368,
+        "p95_ms": 13.21429997915402,
+        "min_ms": 11.495948972878978,
+        "max_ms": 13.611222006147727,
+        "n": 483
+      },
+      "matching_and_correspondence": {
+        "mean_ms": 168.29584740241123,
+        "median_ms": 163.6976999870967,
+        "p95_ms": 223.23328928323463,
+        "min_ms": 108.07268801727332,
+        "max_ms": 265.33649300108664,
+        "n": 483
+      },
+      "pose_estimation": {
+        "mean_ms": 30.015645149261758,
+        "median_ms": 24.00059497449547,
+        "p95_ms": 74.21466800733468,
+        "min_ms": 3.613553009927273,
+        "max_ms": 116.45664199022576,
+        "n": 483
+      },
+      "fine": {
+        "mean_ms": 210.9557769460026,
+        "median_ms": 204.31047899182886,
+        "p95_ms": 299.2052475223318,
+        "min_ms": 134.29459399776533,
+        "max_ms": 350.79245700035244,
+        "n": 483
+      },
+      "end_to_end": {
+        "mean_ms": 213.66263565665938,
+        "median_ms": 206.81553398026153,
+        "p95_ms": 302.71237841807306,
+        "min_ms": 136.40621799277142,
+        "max_ms": 354.1770479932893,
+        "n": 483
+      },
+      "pnp_success_count": 483
+    },
+    "hloc": {
+      "global_extraction": {
+        "mean_ms": 35.4632310079161,
+        "median_ms": 35.46581001137383,
+        "p95_ms": 36.30706720869057,
+        "min_ms": 33.79489801591262,
+        "max_ms": 37.399163004010916,
+        "n": 483
+      },
+      "retrieval": {
+        "mean_ms": 0.11966909753355365,
+        "median_ms": 0.1150539901573211,
+        "p95_ms": 0.14069448516238475,
+        "min_ms": 0.10562202078290284,
+        "max_ms": 0.5475819925777614,
+        "n": 483
+      },
+      "coarse": {
+        "mean_ms": 35.58290010544965,
+        "median_ms": 35.584003024268895,
+        "p95_ms": 36.42140459269285,
+        "min_ms": 33.916726999450475,
+        "max_ms": 37.51741800806485,
+        "n": 483
+      },
+      "local_extraction": {
+        "mean_ms": 12.380637975547494,
+        "median_ms": 12.364411988528445,
+        "p95_ms": 13.043402598123066,
+        "min_ms": 11.049797001760453,
+        "max_ms": 13.80191498901695,
+        "n": 483
+      },
+      "matching_and_correspondence": {
+        "mean_ms": 188.21822731672762,
+        "median_ms": 178.0859929858707,
+        "p95_ms": 249.04963058361318,
+        "min_ms": 121.67790398234501,
+        "max_ms": 316.1628189845942,
+        "n": 483
+      },
+      "pose_estimation": {
+        "mean_ms": 41.529535788340844,
+        "median_ms": 34.88255801494233,
+        "p95_ms": 89.86251669412013,
+        "min_ms": 8.885279996320605,
+        "max_ms": 145.51889299764298,
+        "n": 483
+      },
+      "fine": {
+        "mean_ms": 242.12840108061596,
+        "median_ms": 235.77264498453587,
+        "p95_ms": 324.1857133922167,
+        "min_ms": 144.7795210115146,
+        "max_ms": 419.62764799245633,
+        "n": 483
+      },
+      "end_to_end": {
+        "mean_ms": 278.471637426528,
+        "median_ms": 271.77444301196374,
+        "p95_ms": 361.05540428252425,
+        "min_ms": 179.66661098762415,
+        "max_ms": 457.10168598452583,
+        "n": 483
+      },
+      "pnp_success_count": 483
+    }
+  }
+}

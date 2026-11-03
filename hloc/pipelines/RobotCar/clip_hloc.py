@@ -684,10 +684,10 @@ def rerank_loc_pairs_region(
     preprocess,
     device="cuda",
     rerank_top_k=20,
-    grid=4,
-    top_m=2,
-    reduce="topm_mean",
-    alpha=0.5,
+    grid=3,
+    top_m=1,
+    reduce="max",
+    alpha=0.75,
     region_pool="mean",
     missing_ok=True,
     # ✅ 召回率计算参数
@@ -2440,10 +2440,10 @@ if __name__ == "__main__":
     rerank_region = parser.add_argument_group("Region Reranking (no query image)")
     rerank_region.add_argument("--enable_region_rerank", action="store_true")
     rerank_region.add_argument("--region_top_k", type=int, default=20, help="Only rerank top-K candidates per query.")
-    rerank_region.add_argument("--region_grid", type=int, default=4, help="Grid size (e.g., 3 or 4).")
-    rerank_region.add_argument("--region_top_m", type=int, default=2, help="top-m regions averaged for score.")
-    rerank_region.add_argument("--region_reduce", type=str, default="topm_mean", choices=["topm_mean", "max"])
-    rerank_region.add_argument("--region_alpha", type=float, default=0.5, help="final = alpha*base + (1-alpha)*region")
+    rerank_region.add_argument("--region_grid", type=int, default=3, help="Grid size (e.g., 3 or 4).")
+    rerank_region.add_argument("--region_top_m", type=int, default=1, help="top-m regions averaged for score.")
+    rerank_region.add_argument("--region_reduce", type=str, default="max", choices=["topm_mean", "max"])
+    rerank_region.add_argument("--region_alpha", type=float, default=0.75, help="final = alpha*base + (1-alpha)*region")
     rerank_region.add_argument("--region_pool", type=str, default="mean", choices=["mean", "max"])
     rerank_region.add_argument("--region_use_cross_attn", action="store_true",
                            help="Use cross-attn/token-select module for rerank (topK online).")

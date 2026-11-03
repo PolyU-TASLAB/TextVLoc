@@ -1,0 +1,4 @@
+# Preserve the exact released artifact bytes used by checksums.json.
+repro/paper/**/*.csv -text whitespace=cr-at-eol
+protocols/urbanv2x_paper_positive_pairs.csv -text whitespace=cr-at-eol
+repro/paper/*.npz -text -diff
