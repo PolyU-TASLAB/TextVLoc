@@ -1,16 +1,15 @@
 # TextVLoc
 
-![TextVLoc Overview](overview.png)
+![TextVLoc Overview](figures/overview_re.png)
 
-TextVLoc is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). It uses Urban Street CLIP, a LoRA-adapted CLIP retriever for urban street-view text-image matching, as the coarse retrieval module. This project targets the `SensorKit` setup in this repository and combines:
+TextVLoc is a text-driven visual localization framework for geo-tagged street-view maps, built on [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). Urban Street CLIP adapts the text and visual encoders of DataComp OpenCLIP ViT-L/14 with LoRA to retrieve reference locations from a natural-language description.
 
-- VLM caption generation for query images
-- CLIP-style text-image retrieval
-- LoRA fine-tuning for domain adaptation
-- Optional region reranking for better retrieval quality
-- Optional geometric localization with local feature matching and PnP
+The framework supports two modes:
 
-The codebase is currently organized around the `SensorKit` dataset layout already used in this workspace.
+- **Text-only coarse localization:** retrieve reference images from a description and return the location associated with the top-ranked image. Optional region-aware reranking refines the candidate order.
+- **Text-driven visual localization:** when a query image and a reference SfM map are available, use the text-retrieved candidates for SuperPoint + LightGlue matching and PnP pose estimation.
+
+The overview above shows offline map construction and model adaptation, followed by online text retrieval and optional geometric refinement. The official repository is [PolyU-TASLAB/TextVLoc](https://github.com/PolyU-TASLAB/TextVLoc). The provided commands use the local `SensorKit` layout for UrbanV2X data.
 
 ## Features
 
@@ -23,17 +22,17 @@ The codebase is currently organized around the `SensorKit` dataset layout alread
 
 ## Text Used For Retrieval
 
-This project does not retrieve directly from raw query images. It first converts each query image into a text description, then retrieves database images with a CLIP-style model.
+The retrieval query is a natural-language description. A query photograph is required only for optional geometric refinement. For training and image-conditioned evaluation, VLMs generate descriptions from street-view images; the provided pipeline can generate query captions or reuse an existing caption CSV.
 
 ### Inference-time text
 
-The current default inference setup uses:
+For automatic query-caption generation, the provided pipeline uses:
 
 - caption backend: `qwen-vl`
 - actual VLM: `Qwen/Qwen3-VL-8B-Instruct`
 - generated file pattern: `qwen3_query_prompts_qwen-vl_77clip10.csv`
 
-Each query image is described with a fixed navigation-oriented prompt in [hloc/generate_captions.py](hloc/generate_captions.py). The generated text is intended to be:
+The automatic captioner describes each query image with a fixed navigation-oriented prompt in [hloc/generate_captions.py](hloc/generate_captions.py). The generated text is intended to be:
 
 - first-person viewpoint
 - focused on static landmarks and road structure
@@ -56,6 +55,8 @@ The paper checkpoint adapts the final 8 text blocks and final 12 visual blocks w
 
 ```text
 .
+├── figures/                               # Framework overview
+├── checkpoints/                           # Urban Street CLIP LoRA adapter
 ├── hloc/                                  # HLOC code and TextVLoc pipeline
 ├── scripts/                               # training / evaluation helper scripts
 ├── train_localclip.py                     # LoRA fine-tuning entrypoint
@@ -83,8 +84,8 @@ datasets/SensorKit/
 UrbanV2X image and metadata packages are available from the GitHub Release:
 
 ```bash
-wget https://github.com/xxw77777kk/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_images.tar.gz
-wget https://github.com/xxw77777kk/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_metadata.tar.gz
+wget https://github.com/PolyU-TASLAB/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_images.tar.gz
+wget https://github.com/PolyU-TASLAB/TextVLoc/releases/download/textvloc-urbanv2x-data-v1/textvloc_urbanv2x_metadata.tar.gz
 tar -xzf textvloc_urbanv2x_images.tar.gz
 tar -xzf textvloc_urbanv2x_metadata.tar.gz
 ```
@@ -110,7 +111,7 @@ outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/sfm_superpointmax+
 A minimal ENU-aligned reference SfM package for UrbanV2X fine localization is available from the GitHub Release:
 
 ```bash
-wget https://github.com/xxw77777kk/TextVLoc/releases/download/textvloc-urbanv2x-sfm-v1/textvloc_urbanv2x_sfm_minimal.tar.gz
+wget https://github.com/PolyU-TASLAB/TextVLoc/releases/download/textvloc-urbanv2x-sfm-v1/textvloc_urbanv2x_sfm_minimal.tar.gz
 tar -xzf textvloc_urbanv2x_sfm_minimal.tar.gz
 mkdir -p outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025
 cp -r textvloc_urbanv2x_sfm_minimal/sfm_superpointmax+lightglue \
@@ -220,7 +221,9 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --text_only_loc \
   --enable_region_rerank \
   --region_grid 3 \
-  --region_top_k 20
+  --region_top_k 20 \
+  --region_reduce max \
+  --region_alpha 0.75
 ```
 
 Useful extra flags:
@@ -240,7 +243,7 @@ bash scripts/test_with_rerank.sh
 
 To enable image-based geometric localization, remove `--text_only_loc`. The pipeline will:
 
-1. generate captions for query images
+1. generate or reuse descriptions for the query images
 2. retrieve candidate database images with CLIP
 3. convert retrieval results to matching pairs
 4. run SuperPoint + LightGlue matching
@@ -289,12 +292,18 @@ python3 scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py \
 - `scripts/test_all_loras.sh`: sweep LoRA checkpoints
 - `scripts/test_with_rerank.sh`: evaluate region reranking
 - `scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py`: UrbanV2X opposite-view retrieval evaluation
+- `scripts/generate_query_prompt_variants.py`: natural-language, third-person, brief, noun-phrase and synthetic casual descriptions
+- `scripts/generate_llava_query_captions.py`, `scripts/generate_cam1_deepseek_descriptions.py`, `scripts/generate_cam1_gemma3_descriptions.py`: alternative caption generators
+- `scripts/build_paper_text_perturbations.py`: incomplete descriptions and intended color/object errors
+- `scripts/eval_paper_retrieval.py`: retrieval and coarse-localization evaluation with local caption inputs
+- `scripts/eval_paper_pose.py`: geometric localization and pose-error statistics
+- `scripts/benchmark_online_end_to_end.py`: runtime measurement with prepared map assets
 
 ## Reproducibility Notes
 
 - Datasets, generated descriptions, feature caches and evaluation results are local inputs/outputs. The main LoRA adapter is under `checkpoints/`.
 - The current pipeline is tightly coupled to the `SensorKit` directory structure and several hard-coded paths.
-- If you plan to publish the project publicly, document how others can obtain `SensorKit` data or provide a script that rebuilds the required folder layout.
+- Restore the UrbanV2X image/metadata and optional SfM releases above before running evaluation. Reference local features must match the keypoint ordering used by the SfM model; these features are not included in the minimal SfM package.
 - The 10.7 MB LoRA checkpoint is tracked directly in Git; full backbone weights are downloaded by OpenCLIP.
 
 ## Acknowledgements
