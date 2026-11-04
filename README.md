@@ -1,6 +1,6 @@
 # TextVLoc
 
-![TextVLoc Overview](overview.png)
+![TextVLoc Overview](figures/overview_re.png)
 
 TextVLoc is a text-guided visual localization pipeline built on top of [Hierarchical-Localization (HLOC)](https://github.com/cvg/Hierarchical-Localization). It uses Urban Street CLIP, a LoRA-adapted CLIP retriever for urban street-view text-image matching, as the coarse retrieval module. This project targets the `SensorKit` setup in this repository and combines:
 
