@@ -1,9 +1,0 @@
-These images show different viewing directions around the same location.
-
-Write an English description of about 65 words that could help someone recognize this place. Select clearly visible, distinctive permanent features across the images, such as readable building names, unusual facades, bridges, or intersection layouts.
-
-Prefer specific visible details over generic statements about buildings and trees. Do not invent distinctive details when none are visible, and do not guess unreadable text. Do not add speculative or repetitive content merely to reach the word target.
-
-Write one coherent description, not a separate caption for each image. Avoid people, vehicles, weather, questions, and introductory phrases. Do not use camera-relative directions such as left, right, ahead, or behind. Describe spatial relationships only when supported within the same image.
-
-Output only the description.

@@ -166,17 +166,20 @@ That script currently launches `train_localclip.py` to train Urban Street CLIP w
 You can modify dataset paths, output paths, batch size, and epochs directly in `scripts/run_clip_training_experiments.sh`.
 
 
-### Paper reproduction
+### Evaluation scripts
 
-The current manuscript uses text-last-8 / visual-last-12 LoRA, epoch 22, and a 3x3 maximum-region reranker with global weight 0.75. The full reproduction guide, released query captions, rankings and timing/pose records are in [repro/paper/README.md](repro/paper/README.md). It covers the retrieval, coarse localization, query styles/generators, text perturbations, opposite-view, fine localization and runtime experiments.
+The paper model uses text-last-8 / visual-last-12 LoRA, epoch 22, and a 3x3 maximum-region reranker with global weight 0.75. Evaluation reads local captions, image data and pose/positive-pair CSVs; results are written under `outputs/`.
 
 ```bash
 python3 -m scripts.eval_paper_retrieval check
-python3 -m scripts.eval_paper_pose check
 python3 -m scripts.eval_paper_retrieval evaluate --output-dir outputs/paper_retrieval
 ```
 
-`protocols/urbanv2x_paper_positive_pairs.csv` is the historical list used for the manuscript numbers. The separately released `protocols/urbanv2x_positive_pairs_netvlad05_enu3d20m.csv` enforces ENU 3D distance <=20m and changes some retrieval recall values. The manuscript describes a 20m criterion, but the historical list does not strictly satisfy it; see the reproduction guide for this unresolved manuscript/protocol discrepancy. Geographic localization recall is computed independently from ENU positions.
+Use `--variants natural_static brief_static` to select generated query styles, and repeat `--caption VARIANT=CSV` to supply local descriptions for any generator or perturbation. CSVs must contain `image_name,description` for the same query set. Query/reference pose CSVs use `camera_id,image_id,X_enu,Y_enu,Z_enu`; positive-pair CSVs use `anchor,positive`. All input paths can be set through command-line options. The positive-pair list determines retrieval recall; geographic recall is computed independently from ENU coordinates.
+
+The description generators are `scripts.generate_query_prompt_variants`, `scripts.generate_llava_query_captions`, `scripts.generate_cam1_deepseek_descriptions` and `scripts.generate_cam1_gemma3_descriptions`. Style prompts are in `scripts/query_prompt_variants.json`; the casual-description prompt is in `scripts/query_synthetic_user_variants.json`. Claude descriptions can be supplied as a local CSV. `scripts.build_paper_text_perturbations` generates incomplete/color/object perturbations and requires a local `--landmark-edits` CSV for captions without an existing color word.
+
+`scripts.eval_paper_pose` reads a local retrieval run and pose/map inputs; run it with `--help` for options. `scripts.benchmark_online_end_to_end` measures text/image localization using prepared map assets. `scripts.summarize_paper_timing --input outputs/paper_timing/per_query.csv` aggregates a local timing run.
 
 ## Inference and Evaluation
 
@@ -196,7 +199,7 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv \
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
   --text_only_loc
 ```
 
@@ -213,7 +216,7 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv \
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv \
   --text_only_loc \
   --enable_region_rerank \
   --region_grid 3 \
@@ -254,14 +257,14 @@ python3 -m hloc.pipelines.RobotCar.clip_hloc \
   --caption_model qwen-vl \
   --clip_model_id laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K \
   --lora_ckpt_path checkpoints/text8_visual12_epoch22.pt \
-  --positive_pairs_csv protocols/urbanv2x_paper_positive_pairs.csv
+  --positive_pairs_csv datasets/SensorKit/query/cam1_all/05_allcams_positive_pairs_for_eval.csv
 ```
 
 If you want both reranking and geometric localization, keep `--enable_region_rerank` and omit `--text_only_loc`.
 
 ### 4. UrbanV2X opposite-view retrieval evaluation
 
-The archived UrbanV2X opposite-view protocol compares image retrieval baselines with TextVLoc under viewpoint reversal. The complete-surroundings experiments used for the paper are documented in [repro/opposite_view/README.md](repro/opposite_view/README.md).
+The UrbanV2X opposite-view evaluation compares image retrieval baselines with TextVLoc under viewpoint reversal. The multi-view scripts in `scripts/opposite_view/` accept local reference features through `--source` and a local navigation prompt through `--prompt-file`; their `--help` lists the required inputs.
 
 The archived protocol uses `cam6` as the query stream and `cam1` as the reference/text-source stream. Its text mapping is:
 
@@ -289,7 +292,7 @@ python3 scripts/opposite_view/run_sensorkit_cam6_to_cam1_opposite_view_eval.py \
 
 ## Reproducibility Notes
 
-- Raw `datasets/` and `outputs/` are not tracked. The main LoRA adapter and compact opposite-view evaluation artifacts are versioned under `checkpoints/` and `repro/`.
+- Datasets, generated descriptions, feature caches and evaluation results are local inputs/outputs. The main LoRA adapter is under `checkpoints/`.
 - The current pipeline is tightly coupled to the `SensorKit` directory structure and several hard-coded paths.
 - If you plan to publish the project publicly, document how others can obtain `SensorKit` data or provide a script that rebuilds the required folder layout.
 - The 10.7 MB LoRA checkpoint is tracked directly in Git; full backbone weights are downloaded by OpenCLIP.

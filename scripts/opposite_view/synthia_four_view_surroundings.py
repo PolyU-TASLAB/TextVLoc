@@ -11,11 +11,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-SOURCE = Path("repro/opposite_view/features")
+SOURCE = Path("outputs/text_depth_ablation_v1/three_datasets_text8_visual12")
 OUT = Path("outputs/opposite_view_synthia_four_view_surroundings")
 ROOT = Path("datasets/SYNTHIA/SEQS-02")
 EXTRACTED = Path("outputs/opposite_view_synthia_three_view_no_front/extracted")
-OLD_PROMPT_MANIFEST = Path("repro/opposite_view/multiview_prompt.txt")
+OLD_PROMPT_MANIFEST = None
 
 
 def digest(path):
@@ -162,10 +162,16 @@ def evaluate():
 
 
 def main():
+    global SOURCE, OLD_PROMPT_MANIFEST
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=["generate", "evaluate"])
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--source", type=Path, default=SOURCE, help="Local feature directory with manifest.json and dataset feature NPZ files")
+    parser.add_argument("--prompt-file", type=Path, help="Local plain-text multi-view caption prompt; required for generation")
     args = parser.parse_args()
+    SOURCE, OLD_PROMPT_MANIFEST = args.source, args.prompt_file
+    if args.stage == "generate" and args.prompt_file is None:
+        parser.error("generate requires --prompt-file")
     if args.limit < 0:
         parser.error("--limit must be nonnegative")
     if args.stage == "generate":

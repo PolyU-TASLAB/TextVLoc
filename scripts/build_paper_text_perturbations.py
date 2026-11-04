@@ -49,8 +49,8 @@ def wrong_detail(text):
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source', type=Path, default=root / 'repro/paper/captions/original_qwen.csv')
-    parser.add_argument('--landmark-edits', type=Path, default=root / 'repro/paper/landmark_color_edits.csv')
+    parser.add_argument('--source', type=Path, default=root / 'outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv')
+    parser.add_argument('--landmark-edits', type=Path, required=True, help='Local CSV of grounded replacements for color-free captions')
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     with args.source.open(newline='', encoding='utf-8-sig') as handle:

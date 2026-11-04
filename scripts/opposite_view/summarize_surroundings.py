@@ -1,9 +1,10 @@
 """Combine aligned single-frame opposite-view surroundings experiments."""
 
+import argparse
 import csv
 from pathlib import Path
 
-BASE = Path("repro/opposite_view/features/summary.csv")
+BASE = Path("outputs/text_depth_ablation_v1/three_datasets_text8_visual12/summary.csv")
 OUT = Path("outputs/opposite_view_surroundings_comparison_v1")
 RUNS = [
     ("UrbanV2X", "six_view_no_cam1", Path("outputs/opposite_view_urban_493_six_view_no_cam1/summary.csv"), "paired_cam6_queries"),
@@ -20,9 +21,13 @@ def read(path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--baseline", type=Path, default=BASE)
+    parser.add_argument("--output-dir", type=Path, default=OUT)
+    args = parser.parse_args()
     rows = []
     available = {name for name, _, path, _ in RUNS if path.is_file()}
-    for row in read(BASE):
+    for row in read(args.baseline):
         if row["dataset"] in available and row["method"] in METHODS:
             rows.append({key: row[key] for key in FIELDS})
     for dataset, method, path, setting in RUNS:
@@ -34,12 +39,12 @@ def main():
                 continue
             rows.append({"dataset": dataset, "method": method,
                          **{key: row[key] for key in FIELDS[2:]}})
-    OUT.mkdir(parents=True, exist_ok=True)
-    with (OUT / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    with (args.output_dir / "summary.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, FIELDS)
         writer.writeheader()
         writer.writerows(rows)
-    print(f"Wrote {len(rows)} rows to {OUT / 'summary.csv'}")
+    print(f"Wrote {len(rows)} rows to {args.output_dir / 'summary.csv'}")
 
 
 if __name__ == "__main__":

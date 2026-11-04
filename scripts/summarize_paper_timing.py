@@ -1,4 +1,4 @@
-"""Reaggregate the released per-query measurements used in the paper timing table."""
+"""Aggregate local per-query measurements into a timing summary."""
 import argparse
 import csv
 import json
@@ -6,12 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.eval_paper_retrieval import BUNDLE
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=BUNDLE / "results/timing_per_query.csv")
+    parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
     with args.input.open(newline="") as handle:
@@ -37,12 +36,6 @@ def main():
         table.append({"method": method, "queries": len(records),
                       **{stage: round(values["mean_ms"], 2) for stage, values in summary[method].items()},
                       "throughput_hz": round(1000/summary[method]["end_to_end"]["mean_ms"], 2)})
-    if args.input.resolve() == (BUNDLE / "results/timing_per_query.csv").resolve():
-        expected = json.loads((BUNDLE / "results/timing.json").read_text())
-        for method in methods:
-            for stage, values in summary[method].items():
-                if values["n"] != 483 or not np.isclose(values["mean_ms"], expected["methods"][method][stage]["mean_ms"], rtol=0, atol=1e-9):
-                    raise ValueError(f"Archived timing summary mismatch: {method}/{stage}")
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2)+"\n")

@@ -20,10 +20,10 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-SOURCE = Path("repro/opposite_view/features")
+SOURCE = Path("outputs/text_depth_ablation_v1/three_datasets_text8_visual12")
 PREPARED = Path("datasets/SensorKit/LoST_Robotcar/prepared/overcast_autumn_2m_2km_rectified")
 OUT = Path("outputs/opposite_view_robotcar_four_view_surroundings_fp16")
-PROMPT_MANIFEST = Path("repro/opposite_view/multiview_prompt.txt")
+PROMPT_MANIFEST = None
 
 
 def sha(path):
@@ -208,6 +208,7 @@ def evaluate():
 
 
 def main():
+    global SOURCE, PROMPT_MANIFEST
     global OUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=["check", "generate", "evaluate"])
@@ -216,7 +217,12 @@ def main():
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--out-dir", type=Path, default=OUT)
+    parser.add_argument("--source", type=Path, default=SOURCE, help="Local feature directory with manifest.json and dataset feature NPZ files")
+    parser.add_argument("--prompt-file", type=Path, help="Local plain-text multi-view caption prompt; required for generation")
     args = parser.parse_args()
+    SOURCE, PROMPT_MANIFEST = args.source, args.prompt_file
+    if args.stage == "generate" and args.prompt_file is None:
+        parser.error("generate requires --prompt-file")
     OUT = args.out_dir
     if args.limit < 0 or args.timestamp_tolerance_us < 0:
         parser.error("--limit and --timestamp-tolerance-us must be nonnegative")

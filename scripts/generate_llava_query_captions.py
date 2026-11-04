@@ -9,7 +9,7 @@ from scripts.generate_query_prompt_variants import digest, read_queries, prepare
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--baseline-csv', type=Path, default=Path('repro/paper/captions/original_qwen.csv'))
+    parser.add_argument('--baseline-csv', type=Path, default=Path('outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv'))
     parser.add_argument('--query-dir', type=Path, default=Path('datasets/SensorKit/query/cam1_all/0_undistorted'))
     parser.add_argument('--output-csv', type=Path, default=Path('outputs/query_text_generalization/llava_mistral7b_qwen_prompt_v3/original_prompt.csv'))
     args = parser.parse_args()

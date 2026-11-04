@@ -1,7 +1,7 @@
 """Reproduce the manuscript retrieval, coarse localization and query-text tables.
 
 Run from the repository root with ``python -m scripts.eval_paper_retrieval``.
-The check command needs NumPy only, without model downloads or private caches.
+The check command validates local evaluation inputs without loading models.
 """
 
 import argparse
@@ -15,7 +15,6 @@ import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / "repro/paper"
 METHODS = ("pretrained", "global", "rerank")
 
 
@@ -74,8 +73,8 @@ def write_csv(path, rows):
 
 
 def context(protocol, positive_path):
-    qgt = positions(BUNDLE / "query_positions.csv")
-    dgt = positions(BUNDLE / "reference_positions.csv")
+    qgt = positions(Path(protocol["query_positions"]))
+    dgt = positions(Path(protocol["reference_positions"]))
     queries, database = protocol["query_order"], protocol["database_order"]
     qp = np.array([qgt[f"cam1/{Path(q).name}"] for q in queries])
     dp = np.array([dgt[n] for n in database])
@@ -86,36 +85,17 @@ def context(protocol, positive_path):
 
 
 def check(args, protocol):
-    checksums = json.loads((BUNDLE / "checksums.json").read_text())
-    for name, expected in checksums.items():
-        if sha256(ROOT / name) != expected:
-            raise ValueError(f"Published artifact checksum mismatch: {name}")
-    queries, database, positives, qp, dp = context(protocol, args.positive_pairs)
-    expected = json.loads((BUNDLE / "expected_recall.json").read_text())
-    rows = []
-    with np.load(BUNDLE / "rankings.npz", allow_pickle=False) as rankings:
-        for variant, path in protocol["caption_paths"].items():
-            read_captions(ROOT / path, queries)
-            global_rank, rerank = rankings[f"{variant}__global"], rankings[f"{variant}__rerank"]
-            if not np.array_equal(np.sort(global_rank, axis=1), np.sort(rerank, axis=1)):
-                raise ValueError(f"Rerank changed candidate membership: {variant}")
-            for method in METHODS:
-                key = f"{variant}__{method}"
-                result = summarize(rankings[key], queries, database, positives, qp, dp)
-                actual = [round(r["positive_recall_pct"], 2) for r in result]
-                if args.positive_pairs.resolve() == (ROOT / protocol["positive_pairs"]).resolve():
-                    if actual != expected[key]:
-                        raise ValueError(f"Recall differs from manuscript: {key}: {actual} != {expected[key]}")
-                rows.extend({"variant": variant, "method": method, **r} for r in result)
-    if args.output_dir:
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        write_csv(args.output_dir / "summary.csv", rows)
-    print(f"PASS: {len(checksums)} artifact hashes; {len(protocol['caption_paths'])} caption sets; "
-          f"{len(rows)} metric rows, {len(queries)} queries, {len(database)} references")
-    for row in rows:
-        if row["K"] == 1:
-            print(f"{row['variant']:24s} {row['method']:10s} R@1={row['positive_recall_pct']:.2f}% "
-                  f"Top1<10m={row['loc_10m_pct']:.2f}%")
+    queries, database, _, _, _ = context(protocol, args.positive_pairs)
+    variants = args.variants or ["original_qwen"]
+    paths = dict(protocol["caption_paths"])
+    for item in args.caption:
+        label, separator, path = item.partition("=")
+        if not separator or not path:
+            raise ValueError("--caption requires VARIANT=CSV")
+        paths[label] = path
+    for variant in variants:
+        read_captions(Path(paths[variant]), queries)
+    print(f"PASS: {len(queries)} queries, {len(database)} references, {len(variants)} caption sets")
 
 
 def evaluate(args, protocol):
@@ -136,12 +116,12 @@ def evaluate(args, protocol):
     overridden = set()
     for item in args.caption:
         label, separator, path = item.partition("=")
-        if not separator or not path or label not in caption_paths or label in overridden:
-            raise ValueError("--caption requires a unique existing VARIANT=CSV")
+        if not separator or not path or not label or label in overridden:
+            raise ValueError("--caption requires a unique VARIANT=CSV")
         caption_paths[label] = Path(path)
         overridden.add(label)
-    variants = args.variants or list(protocol["caption_paths"])
-    if any(v not in protocol["caption_paths"] for v in variants):
+    variants = args.variants or ["original_qwen"]
+    if any(v not in caption_paths for v in variants):
         raise ValueError("Unknown caption variant")
     texts = {}
     for variant in variants:
@@ -274,12 +254,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "evaluate"))
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--positive-pairs", type=Path, default=ROOT / "protocols/urbanv2x_paper_positive_pairs.csv")
+    parser.add_argument("--positive-pairs", type=Path, default=None)
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "datasets/SensorKit")
     parser.add_argument("--checkpoint", type=Path, default=ROOT / "checkpoints/text8_visual12_epoch22.pt")
+    parser.add_argument("--query-captions", type=Path, default=ROOT / "outputs/SensorKit_hloc/allcams_spatial_colmap_0630_CAM1_0.025/qwen3_query_prompts_qwen-vl_77clip10.csv")
+    parser.add_argument("--query-positions", type=Path)
+    parser.add_argument("--reference-positions", type=Path)
+    parser.add_argument("--database-list", type=Path, help="Optional newline-separated reference names; otherwise use non-cam1 mapping poses")
     parser.add_argument("--variants", nargs="+")
     parser.add_argument("--caption", action="append", default=[], metavar="VARIANT=CSV",
-                        help="Override an evaluated caption CSV without changing the released archive")
+                        help="Use a local caption CSV for a variant")
     parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=32)
@@ -289,7 +273,33 @@ def main():
     args = parser.parse_args()
     if args.batch_size < 1 or args.query_limit < 0 or args.reference_limit < 0:
         parser.error("Batch size must be positive; limits must be nonnegative")
-    protocol = json.loads((BUNDLE / "protocol.json").read_text())
+    args.positive_pairs = args.positive_pairs or args.dataset_root / "query/cam1_all/05_allcams_positive_pairs_for_eval.csv"
+    args.query_positions = args.query_positions or args.dataset_root / "0620_gt/enu_all_query_gt.csv"
+    args.reference_positions = args.reference_positions or args.dataset_root / "0620_gt/enu_all_mapping_gt.csv"
+    with args.query_captions.open(newline="", encoding="utf-8-sig") as handle:
+        names = [r["image_name"] for r in csv.DictReader(handle)]
+    if not names or len(names) != len(set(names)):
+        raise ValueError("Query names must be nonempty and unique")
+    database = sorted(n for n in positions(args.reference_positions) if not n.startswith("cam1/"))
+    if args.database_list:
+        database = [line.strip() for line in args.database_list.read_text().splitlines() if line.strip()]
+    if not database or len(database) != len(set(database)):
+        raise ValueError("Reference names must be nonempty and unique")
+    variants_root = ROOT / "outputs/query_text_generalization"
+    caption_paths = {"original_qwen": str(args.query_captions)}
+    caption_paths.update({v: str(variants_root / "qwen3_prompt_v1" / f"{v}.csv") for v in
+                          ("natural_static", "third_person_static", "brief_static", "noun_phrases")})
+    caption_paths.update({
+        "synthetic_casual": str(variants_root / "qwen3_synthetic_user_v1/synthetic_casual.csv"),
+        "llava_original_prompt": str(variants_root / "llava_mistral7b_qwen_prompt_v3/original_prompt.csv"),
+        "claude_opus55": str(variants_root / "claude_opus55_qwen_prompt_v1/original_prompt.csv"),
+        "deepseek_flash": str(ROOT / "outputs/cam1_deepseek_query_descriptions/descriptions.csv"),
+        "gemma3_12b": str(ROOT / "outputs/cam1_gemma3_query_descriptions/descriptions.csv"),
+        **{f"controlled_{v}": str(ROOT / f"outputs/paper_text_perturbations/controlled_{v}.csv") for v in
+           ("incomplete", "color", "detail")},
+    })
+    protocol = {"query_order": names, "database_order": database, "caption_paths": caption_paths,
+                "query_positions": str(args.query_positions), "reference_positions": str(args.reference_positions)}
     (check if args.command == "check" else evaluate)(args, protocol)
 
 
